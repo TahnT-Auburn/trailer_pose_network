@@ -24,12 +24,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 
+
 model_params={
-        "shape_in": (3,500,500), 
+        "shape_in": (3,512,512), 
         "initial_filters": 32,    
         "num_fc1": 300,
         "dropout_rate": 0.25}
-
 model = mango_net(model_params)
 
 
@@ -41,7 +41,7 @@ model = model.to(device)
 
 tf=transforms.Compose([
     transforms.ToPILImage(),
-    transforms.Resize((500,500)),
+    transforms.Resize((512,512)),
     transforms.ToTensor()
 ])
 
@@ -59,13 +59,13 @@ def get_pitch(input_img):
 
 
 # Create a VideoCapture object and read from input file 
-# cap = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/RoadRunner/TrainingData/Raw/INT/INT1/videos/RRMC.mp4') 
-# cap2 = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/RoadRunner/TrainingData/Raw/INT/INT1/videos/LRMC.mp4') 
-# truth_file = "/home/gavlab/Trailer_Pitch_Estimate/TrainingData/RoadRunner/TrainingData/processed/INT/INT1/INT1_training.csv"
+cap = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/RoadRunner/TrainingData/Raw/INT/INT1/videos/RRMC.mp4') 
+cap2 = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/RoadRunner/TrainingData/Raw/INT/INT1/videos/LRMC.mp4') 
+truth_file = "/home/gavlab/Trailer_Pitch_Estimate/TrainingData/RoadRunner/TrainingData/processed/INT/INT1/INT1_training.csv"
 
-cap = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/source/videos/RRMC.mp4') 
-cap2 = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/source/videos/LRMC.mp4') 
-truth_file = "/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/training/procedure1_training_data.csv"
+# cap = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/source/videos/RRMC.mp4') 
+# cap2 = cv2.VideoCapture('/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/source/videos/LRMC.mp4') 
+# truth_file = "/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/training/procedure1_training_data.csv"
 
 
 i=0

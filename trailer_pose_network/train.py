@@ -15,7 +15,7 @@ from torch import optim
 from PIL import Image
 from torch.utils.data import Dataset
 # import model
- 
+import math
 from models.mango_net import mango_net
 
 #Procedure 1 Data 
@@ -77,6 +77,9 @@ def NLLloss(y, mean, var):
 
 
 
+def MAE(x,y):
+    loss = math.sqrt(abs(x**2-y**2))
+    return loss
 
 
 opt = torch.optim.Adam(model.parameters(), lr=3e-4)
@@ -107,7 +110,8 @@ for epoch in range(10):
         # loss = NLLloss(labels, mu, sig)
 
         mu = model(inputs)
-        loss = loss_fun(mu, labels.float())
+        # loss = loss_fun(mu, labels.float())
+        loss = MAE(mu,labels.float())
 
 
 

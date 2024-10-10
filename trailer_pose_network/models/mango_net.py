@@ -46,7 +46,6 @@ class mango_net(nn.Module):
         
 
 
-        self.num_flatten = 184320
         
         # Convolution Layers
         self.conv1 = nn.Conv2d(channels, init_f, kernel_size=3)      #Three channel, 16 filters, 3x3 kernel 
@@ -73,16 +72,16 @@ class mango_net(nn.Module):
         
         # Convolution & Pool Layers
         X = F.relu(self.conv1(X)); 
-        X = self.conv1_bn(X)
+        # X = self.conv1_bn(X)
         X = F.max_pool2d(X, 2, 2)
         X = F.relu(self.conv2(X))
-        X = self.conv2_bn(X)
+        # X = self.conv2_bn(X)
         X = F.max_pool2d(X, 2, 2)
         X = F.relu(self.conv3(X))
-        X = self.conv3_bn(X)
+        # X = self.conv3_bn(X)
         X = F.max_pool2d(X, 2, 2)
         X = F.relu(self.conv4(X))
-        X = self.conv4_bn(X)
+        # X = self.conv4_bn(X)
         X = F.max_pool2d(X, 2, 2)
 
         X = X.view(-1, self.num_flatten)

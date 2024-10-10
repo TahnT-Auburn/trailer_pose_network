@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms, utils
 
-from trailer_pose_network.custom_transforms import *
+from custom_transforms import *
 
 #%% Generate dataset class
 
