@@ -27,7 +27,7 @@ from trailer_pose_network.custom_transforms import *
 TRAIN_CSV = 'C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\data\\combined\\combined_data.csv'
 full_set = TrailerData(csv_file=TRAIN_CSV,
                        transform=transforms.Compose([
-                                 Rescale((1000,1000)),
+                                 Rescale((512,512)),
                                  transforms.ToTensor(),
                                 #  transforms.Normalize((0.32997385, 0.3125009, 0.3013311), (1, 1, 1)),
                                 ]))

@@ -1,10 +1,10 @@
 '''
-############### Data Combiner for Trailer Network Data ###############
+############### Data Combiner for Trailer Network Data ################
 
 Utility script to combine data from different directories to a singular
 .csv file
 
-######################################################################
+#######################################################################
 '''
 
 #%%

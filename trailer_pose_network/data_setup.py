@@ -60,8 +60,3 @@ class TrailerData(Dataset):
 
                 return input_image, hitch_truth.float()
 
-###################################################################################
-#                              END OF FUNCTIONAL
-#                               
-#                         BEGINING OF TEST DRIVEN DEV
-###################################################################################
