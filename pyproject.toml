@@ -2,22 +2,16 @@
 name = "trailer-pose-network"
 version = "0.1.0"
 description = ""
-authors = ["pzt0029 <pzt002@auburn.edu>"]
+authors = ["Tahn Thawainin <pzt0029@auburn.edu>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
 numpy = "^2.1.2"
-torch = "^2.4.1"
 pandas = "^2.2.3"
-scikit-image = "^0.24.0"
 matplotlib = "^3.9.2"
-torchvision = "^0.19.1"
 opencv-python = "^4.10.0.84"
 
-
-[tool.poetry.group.dev.dependencies]
-ipykernel = "^6.29.5"
 
 [build-system]
 requires = ["poetry-core"]

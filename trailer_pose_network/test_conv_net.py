@@ -90,7 +90,7 @@ class MangoNet(nn.Module):
         X = X.view(-1, self.num_flatten)
         
         X = F.relu(self.fc1(X))
-        # X=F.dropout(X, self.dropout_rate)
+        X=F.dropout(X, self.dropout_rate)
         mu= self.fc_mu(X)
         # sig = self.fc_sig(X)
         # sig = F.softplus(sig)+1e-6

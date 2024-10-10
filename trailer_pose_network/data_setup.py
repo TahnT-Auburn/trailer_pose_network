@@ -13,7 +13,6 @@ Author: Tahn Thawainin, AU GAVLAB
 import os
 import torch
 import pandas as pd
-from skimage import io, transform
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt

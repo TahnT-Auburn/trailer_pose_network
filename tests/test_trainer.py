@@ -21,7 +21,7 @@ from trailer_pose_network.trainer import Trainer
 # Generate and organize data 
 print("Setting up data ...")
 
-TRAIN_CSV = 'C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\data\\combined\\combined_data.csv'
+TRAIN_CSV = '/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/combined/combined_data.csv'
 full_set = TrailerData(csv_file=TRAIN_CSV,
                        transform=transforms.Compose([
                                  Rescale((512,512)),
@@ -42,9 +42,9 @@ NUM_TRAIN = len(full_set) - NUM_VAL
 baby_set, train_set, val_set = random_split(full_set,[0.2,0.74,0.06])
 
 # generate loaders
-loader_train = DataLoader(train_set, batch_size=64, shuffle=True)
-loader_val = DataLoader(val_set, batch_size=64, shuffle=True)
-loader_baby = DataLoader(baby_set, batch_size=64, shuffle=True)
+loader_train = DataLoader(train_set, batch_size=32, shuffle=True)
+loader_val = DataLoader(val_set, batch_size=32, shuffle=True)
+loader_baby = DataLoader(baby_set, batch_size=32, shuffle=True)
 
 print("Length of train set: %d" % loader_train.sampler.num_samples)
 print("Length of val set: %d" % loader_val.sampler.num_samples)
@@ -56,19 +56,25 @@ print("Training model ...")
 
 model_params={
         "shape_in": (3,512,512), 
-        "initial_filters": 96,    
+        "initial_filters": 32,    
         "num_fc1": 200,
         "dropout_rate": 0.5}
 
 model = MangoNet(model_params)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print("Device in Use: %s" % device)
+torch.cuda.empty_cache()
+# CUDA_LAUCH_BLOCKING=1
 model = model.to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
 
 network_trainer = Trainer(model=model,
                           optimizer=optimizer,
                           loader_train=loader_baby,
-                          loader_val=loader_val)
+                          loader_val=loader_val,
+                          loss_weight=100,
+                          device=device,
+                          verbose={"cond":True,"print_every":25})
 
 loss_history, acc_train_history, acc_val_history = network_trainer.train()
 
