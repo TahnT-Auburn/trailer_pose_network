@@ -30,8 +30,6 @@ def findConv2dOutShape(hin,win,conv,pool=2):
     return int(hout),int(wout)
 
 
-
-
 # Neural Network
 class mango_net(nn.Module):
     # Network Initialisation
@@ -46,20 +44,18 @@ class mango_net(nn.Module):
         
 
 
+        # self.num_flatten = 184320
         
         # Convolution Layers
         self.conv1 = nn.Conv2d(channels, init_f, kernel_size=3)      #Three channel, 16 filters, 3x3 kernel 
         h,w=findConv2dOutShape(height,width,self.conv1)
-        self.conv1_bn = nn.BatchNorm2d(init_f)
         self.conv2 = nn.Conv2d(init_f, 2*init_f, kernel_size=3)
         h,w=findConv2dOutShape(h,w,self.conv2)
-        self.conv2_bn = nn.BatchNorm2d(init_f*2)
         self.conv3 = nn.Conv2d(2*init_f, 4*init_f, kernel_size=3)
         h,w=findConv2dOutShape(h,w,self.conv3)
-        self.conv3_bn = nn.BatchNorm2d(init_f*4)
         self.conv4 = nn.Conv2d(4*init_f, 8*init_f, kernel_size=3)
         h,w=findConv2dOutShape(h,w,self.conv4)
-        self.conv4_bn = nn.BatchNorm2d(init_f*8)
+        
         # compute the flatten size
         self.num_flatten=h*w*8*init_f #Compute the number of nodes in output layer 
         self.fc1 = nn.Linear(self.num_flatten, num_fc1)
@@ -72,16 +68,12 @@ class mango_net(nn.Module):
         
         # Convolution & Pool Layers
         X = F.relu(self.conv1(X)); 
-        # X = self.conv1_bn(X)
         X = F.max_pool2d(X, 2, 2)
         X = F.relu(self.conv2(X))
-        # X = self.conv2_bn(X)
         X = F.max_pool2d(X, 2, 2)
         X = F.relu(self.conv3(X))
-        # X = self.conv3_bn(X)
         X = F.max_pool2d(X, 2, 2)
         X = F.relu(self.conv4(X))
-        # X = self.conv4_bn(X)
         X = F.max_pool2d(X, 2, 2)
 
         X = X.view(-1, self.num_flatten)
@@ -89,42 +81,6 @@ class mango_net(nn.Module):
         X = F.relu(self.fc1(X))
         X=F.dropout(X, self.dropout_rate)
         mu= self.fc_mu(X)
-        # sig = self.fc_sig(X)
-        # sig = F.softplus(sig)+1e-6
-        return mu
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        sig = self.fc_sig(X)
+        sig = F.softplus(sig)+1e-6
+        return mu, sig 

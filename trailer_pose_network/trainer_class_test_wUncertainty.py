@@ -19,11 +19,13 @@ import math
 
 from data_setup import TrailerData
 from custom_transforms import *
-from trainer import Trainer
+from trainer_wUncertainty import TrainerwStd
 
 
 
-from models.mango_net import mango_net
+# from models.mango_net import mango_net
+from models.mango_net_wUncertainty import mango_net
+
 #Procedure 1 Data 
 # TRAIN_CSV = "/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/training/train.csv"
 # TEST_CSV = "/home/gavlab/Trailer_Pitch_Estimate/TrainingData/procedure1/training/test.csv"
@@ -87,9 +89,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Device in use: ", device)
 
 model = model.to(device)
-opt = torch.optim.Adam(model.parameters(), lr=3e-5, weight_decay= 1e-4)
+opt = torch.optim.Adam(model.parameters(), lr=3e-7, weight_decay= 1e-3)
 
-network_trainer = Trainer(model=model,
+network_trainer = TrainerwStd(model=model,
                           optimizer=opt,
                           loader_train=loader_train,
                           loader_val=loader_val,
@@ -98,9 +100,9 @@ network_trainer = Trainer(model=model,
                           verbose={"cond":True,"print_every":25})
 
 
-loss_history, err_train_history, err_val_history, model_weights= network_trainer.train(epochs=3)
+loss_history, err_train_history, err_val_history, model_weights= network_trainer.train(epochs=10)
 
-torch.save(model_weights, "mango_net3.pth")
+torch.save(model_weights, "mango_net_wSTD2.pth")
 # plot loss
 plt.subplot(2,1,1)
 plt.plot(loss_history, '-')

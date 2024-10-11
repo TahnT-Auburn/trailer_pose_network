@@ -17,7 +17,8 @@ import torchvision.transforms.functional as TF
 import math
 from torch import optim
 
-from models.mango_net import mango_net
+from models.mango_net_wUncertainty import mango_net
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -33,7 +34,7 @@ model_params={
 model = mango_net(model_params)
 
 
-state_dict = torch.load("weights/mango_net3.pth")
+state_dict = torch.load("weights/mango_net3_wSTD.pth")
 model.load_state_dict(state_dict)
 model.eval()
 model = model.to(device)
@@ -53,8 +54,8 @@ tf=transforms.Compose([
 def get_pitch(input_img):
     input_img = tf(input_img)
     image_ten = input_img.to(device)
-    pred_mu = model(image_ten)
-    return pred_mu.item()
+    pred_mu, pred_std = model(image_ten)
+    return pred_mu.item(), pred_std.item()
 
 
 
@@ -97,19 +98,20 @@ while(cap.isOpened()):
    
         #Concatenate the Two Images
         image = cv2.hconcat([frame, frame2])
-        pred_mu = get_pitch(image)
+        pred_mu, pred_sig = get_pitch(image)
+        print(pred_sig*180/3.14159)
 
         image = cv2.resize(image, (1000,421))
 
         pred_array.append(pred_mu*180/3.14159)
-        # pred_sig_array.append(pred_sig)
+        pred_sig_array.append(pred_sig*3*180/3.14159)
         image = cv2.putText(image, str(round(truth*180/3.14159,5)), (350,200), cv2.FONT_HERSHEY_SIMPLEX ,  2, (255,0,0), 2, cv2.LINE_AA) 
         image = cv2.putText(image, str(round(pred_mu*180/3.14159,5)), (350,300), cv2.FONT_HERSHEY_SIMPLEX ,  2, (0,0,255), 2, cv2.LINE_AA) 
         cv2.imshow("Predictions", image)
         cv2.waitKey(3)
         print("---")
-        print(truth*180/3.1415926)
-        print(pred_mu*180/3.1415926)
+        # print(truth*180/3.1415926)
+        # print(pred_mu*180/3.1415926)
         # print(pred_sig)
 
     # Press Q on keyboard to exit 
@@ -133,7 +135,7 @@ plt.figure(200)
 
 plt.plot(i_array, pred_array, 'b', label = "Estimated")
 plt.plot(i_array, truth_array, 'r', label="True Pitch")
-# plt.fill_between(i_array, np.array(pred_array)-np.array(pred_sig_array), np.array(pred_array)+np.array(pred_sig_array),color='grey',alpha=0.6, label="Uncertainty Bounds")
+plt.fill_between(i_array, np.array(pred_array)-np.array(pred_sig_array), np.array(pred_array)+np.array(pred_sig_array),color='grey',alpha=0.6, label="Uncertainty Bounds")
 
 plt.xlabel("Frame Number")  # add X-axis label
 plt.ylabel("Pitch [DEG]")  # add Y-axis label

@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
-class Trainer():
+class TrainerwStd():
     '''
     Trainer utility class
 
@@ -72,8 +72,8 @@ class Trainer():
                 y_val = val_pair[1].to(device=self.device, dtype=torch.float32)
 
                 # call model, compute estimates
-                est_train = self.model(x_train)
-                est_val = self.model(x_val)
+                est_train, _= self.model(x_train)
+                est_val, _ = self.model(x_val)
                 # _, preds_train = est_train.max(1)
                 # _, preds_val = est_val.max(1)
                 
@@ -90,6 +90,12 @@ class Trainer():
 
         return err_train, err_val
     
+    
+    def NLLloss(self, y, mean, var):
+        """ Negative log-likelihood loss function. """
+        return torch.sum(torch.log(var) + torch.pow(y - mean, 2)/var) 
+
+
     def train(self, loss_func=None, params=None, epochs=5):
         '''
         Train function to call.
@@ -122,13 +128,15 @@ class Trainer():
                
                 self.model.train()
                 # call model to estimate
-                est = self.model(x)
+                est, std = self.model(x)
                 est = est.squeeze()
+                std = std.squeeze()
                 # compute loss
                 # loss = loss_func(**params)
                 self.optimizer.zero_grad()
-                loss_fun = nn.MSELoss()
-                loss = loss_fun(est, y)
+                # loss_fun = nn.MSELoss()
+                
+                loss = self.NLLloss(y, est, std)
                 loss = self.loss_weight*loss
                 if initial_loss is None:
                     initial_loss = loss.item()
