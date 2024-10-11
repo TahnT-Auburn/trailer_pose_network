@@ -36,7 +36,7 @@ class Trainer():
                        optimizer,
                        loader_train,
                        loader_val,
-                       loss_weight=1,
+                       loss_scale=1,
                        device=torch.device('cpu'),
                        verbose={"cond": True, "print_every": 100}):
 
@@ -44,7 +44,7 @@ class Trainer():
         self.optimizer = optimizer
         self.loader_train = loader_train
         self.loader_val = loader_val
-        self.loss_weight = loss_weight
+        self.loss_scale = loss_scale
         self.device = device
         self.verbose = verbose
 
@@ -80,7 +80,11 @@ class Trainer():
                 num_samples += 1
 
             err_train /= num_samples
-            err_train /= num_samples
+            err_val /= num_samples
+
+            err_train = np.rad2deg(err_train)
+            err_val = np.rad2deg(err_val)
+            
         return err_train, err_val
     
     def train(self, loss_func=None, params=None, epochs=1):
@@ -97,8 +101,8 @@ class Trainer():
 
         # initilize histories
         loss_history = []
-        acc_train_history = []
-        acc_val_history = []
+        mse_train_history = []
+        mse_val_history = []
         initial_loss = None
 
         self.model = self.model.to(device=self.device)
@@ -121,7 +125,7 @@ class Trainer():
                 # loss = loss_func(**params)
                 loss_fun = nn.MSELoss()
                 loss = loss_fun(est, y)
-                loss = self.loss_weight * loss
+                loss = self.loss_scale * loss
                 if initial_loss is None:
                     initial_loss = loss.item()
                     loss_history.append(initial_loss)
@@ -141,13 +145,13 @@ class Trainer():
 
             # check the training and validation accuracies at the end of every epoch
             err_train, err_val = self.check_accuracy()
-            print('Training MSE at Epoch %d: %.2f' % (e+1, err_train))
-            print('Validation MSE at Epoch %d: %.2f' % (e+1, err_val))
+            print('Training MSE: %.2f' % (err_train))
+            print('Validation MSE: %.2f' % (err_val))
             print()
 
             # append histories per epoch
             loss_history.append(loss.item())
-            acc_train_history.append(err_train)
-            acc_val_history.append(err_val)
+            mse_train_history.append(err_train)
+            mse_val_history.append(err_val)
         
-        return loss_history, acc_train_history, acc_val_history
+        return loss_history, mse_train_history, mse_val_history

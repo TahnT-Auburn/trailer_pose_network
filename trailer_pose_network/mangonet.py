@@ -1,13 +1,13 @@
 '''
-########### Simple Convolutional Neural Network Module ###########
+################ Mango Net Module ################
 
-Simple convolutional neural network intended for code stack developement
+Mango Net
 
 Author: Tahn Thawainin, AU GAVLAB
         email: pzt0029@auburn.edu
         github: https://github.com/TahnT-Auburn
 
-###################################################################
+##################################################
 '''
 
 #%%

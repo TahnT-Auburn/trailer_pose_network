@@ -10,7 +10,6 @@
 import os
 import torch
 import pandas as pd
-from skimage import io, transform
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,7 +23,7 @@ from trailer_pose_network.custom_transforms import *
 # NOTE: All code below is intended for test driven development.
 #       Execution code is located outside this script
 
-TRAIN_CSV = 'C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\data\\combined\\combined_data.csv'
+TRAIN_CSV = '/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/reduced/reduced_data.csv'
 full_set = TrailerData(csv_file=TRAIN_CSV,
                        transform=transforms.Compose([
                                  Rescale((512,512)),
