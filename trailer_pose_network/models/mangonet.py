@@ -34,7 +34,7 @@ def findConv2dOutShape(hin,win,conv,pool=2):
 
 
 
-# Neural Network
+# Mango Net
 class MangoNet(nn.Module):
     # Network Initialisation
     def __init__(self, params):
@@ -74,7 +74,7 @@ class MangoNet(nn.Module):
     def forward(self,X):
         
         # Convolution & Pool Layers
-        X = F.relu(self.conv1(X)); 
+        X = F.relu(self.conv1(X))
         X = self.conv1_bn(X)
         X = F.max_pool2d(X, 2, 2)
         X = F.relu(self.conv2(X))
@@ -86,7 +86,7 @@ class MangoNet(nn.Module):
         X = F.relu(self.conv4(X))
         X = self.conv4_bn(X)
         X = F.max_pool2d(X, 2, 2)
-
+        
         X = X.view(-1, self.num_flatten)
         
         X = F.relu(self.fc1(X))

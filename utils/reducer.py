@@ -5,7 +5,7 @@ import csv
 
 
 input_path = '/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/combined/combined_data_augmented.csv'
-output_path = '/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/reduced/reduced_data.csv'
+output_path = '/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/reduced/reduced_data_v4.csv'
 counter = 0
 
 df = pd.read_csv(input_path, index_col=0)
@@ -15,9 +15,9 @@ column_names = df.columns
 
 n = df[column_names[15]].value_counts().min()
 
-df = df.sample(frac=1)
+# df = df.sample(frac=1)
 
-df = df.groupby(column_names[15]).head(300)
+df = df.groupby(column_names[15]).head(200)
 print(column_names[15])
 
 print(len(df.index))

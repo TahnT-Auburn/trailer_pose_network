@@ -38,9 +38,23 @@ class TrailerData(Dataset):
                 return len(self.df)
         
         def __getitem__(self, idx):
+
+                # temporary test folder add
+                left_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/processed/INT/INT2/images/LRMC/"
+                right_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/processed/INT/INT2/images/RRMC/"
+
+
+                # left_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/HWY/HWY1/images/LRMC/"
+                # right_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/HWY/HWY1/images/RRMC/"
+                # left_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/INT/INT1/images/LRMC/"
+                # right_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/INT/INT1/images/RRMC/"
+
                 # read in camera images at given idx
-                left_image = cv2.imread(str(self.df[self.column_names[0]][idx]))
-                right_image = cv2.imread(str(self.df[self.column_names[1]][idx]))
+                left_image = cv2.imread(left_path + str(self.df[self.column_names[0]][idx]) + ".jpg")
+                right_image = cv2.imread(right_path + str(self.df[self.column_names[1]][idx]) + ".jpg")
+
+                # left_image = cv2.imread(str(self.df[self.column_names[0]][idx]))
+                # right_image = cv2.imread(str(self.df[self.column_names[1]][idx]))
 
                 # concatenate the images
                 input_image = cv2.hconcat([right_image, left_image])

@@ -26,7 +26,8 @@ from trailer_pose_network.custom_transforms import *
 TRAIN_CSV = '/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/reduced/reduced_data.csv'
 full_set = TrailerData(csv_file=TRAIN_CSV,
                        transform=transforms.Compose([
-                                 Rescale((512,512)),
+                                 transforms.ToPILImage(),
+                                 transforms.Resize((512,512)),
                                  transforms.ToTensor(),
                                 #  transforms.Normalize((0.32997385, 0.3125009, 0.3013311), (1, 1, 1)),
                                 ]))
