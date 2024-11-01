@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 
 #%%
 # load data
-FULL_CSV = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/combined/combined_data.csv"
-REDUCED_CSV = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/reduced/reduced_data_v2.csv"
+FULL_CSV = "C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\data\\combined\\combined_data.csv"
+REDUCED_CSV = "C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\data\\reduced\\reduced_data_v1.csv"
 
 full_df= pd.read_csv(FULL_CSV)
 reduced_df= pd.read_csv(REDUCED_CSV)

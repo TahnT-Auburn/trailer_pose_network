@@ -40,14 +40,14 @@ class TrailerData(Dataset):
         def __getitem__(self, idx):
 
                 # temporary test folder add
-                left_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/processed/INT/INT2/images/LRMC/"
-                right_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/processed/INT/INT2/images/RRMC/"
+                # left_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/processed/INT/INT2/images/LRMC/"
+                # right_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/processed/INT/INT2/images/RRMC/"
 
 
-                # left_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/HWY/HWY1/images/LRMC/"
-                # right_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/HWY/HWY1/images/RRMC/"
-                # left_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/INT/INT1/images/LRMC/"
-                # right_path = "/home/tahn/Software/Networks/trailer_pose_network/trailer_pose_network/data/testing/processed/INT/INT1/images/RRMC/"
+                left_path = "D:\\TestingData\\processed\\HWY\\HWY1\\images\\LRMC\\"
+                right_path = "D:\\TestingData\\processed\\HWY\\HWY1\\images\\RRMC\\"
+                # left_path = "D:\\TestingData\\processed\\INT\\INT1\\images\\LRMC\\"
+                # right_path = "D:\\TestingData\\processed\\INT\\INT1\\images\\RRMC\\"
 
                 # read in camera images at given idx
                 left_image = cv2.imread(left_path + str(self.df[self.column_names[0]][idx]) + ".jpg")
@@ -59,9 +59,6 @@ class TrailerData(Dataset):
                 # concatenate the images
                 input_image = cv2.hconcat([right_image, left_image])
                 input_image = cv2.cvtColor(input_image, cv2.COLOR_RGB2BGR)
-                # convert from cv image to ndarray
-                # input_image = np.array(input_image)
-                # input_image = input_image.astype(np.float32)
                 
                 # apply transforms if passed
                 if self.transform:

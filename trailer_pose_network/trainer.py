@@ -35,10 +35,11 @@ class Trainer():
                              and output path string. \\
                              Items: {"cond": boolean, "save_path": string}
     '''
-    def __init__(self, model,
-                       optimizer,
-                       loader_train,
-                       loader_val,
+    def __init__(self, model=None,
+                       optimizer=None,
+                       scheduler=None,
+                       loader_train=None,
+                       loader_val=None,
                        loss_scale=1,
                        device=torch.device('cpu'),
                        verbose={"cond": True, "print_every": 100},
@@ -46,6 +47,7 @@ class Trainer():
 
         self.model = model
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.loader_train = loader_train
         self.loader_val = loader_val
         self.loss_scale = loss_scale
@@ -185,6 +187,10 @@ class Trainer():
                 # verbose updates
                 if self.verbose["cond"] == True and t % self.verbose["print_every"] == 0:
                     print('Iteration %d, loss = %.4f' % (t,loss.item()))
+
+            # step scheduler
+            if self.scheduler is not None:
+                self.scheduler.step()
 
             # check the training and validation accuracies at the end of every epoch
             rmse_train, rmse_val, std_train, std_val = self.check_accuracy()
