@@ -15,7 +15,6 @@ from pathlib import Path
 from trailer_pose_network.custom_transforms import *
 from trailer_pose_network.data_setup import TrailerData
 from trailer_pose_network.models.mangonet import MangoNet
-from trailer_pose_network.models.mangonet2 import MangoNet2
 from trailer_pose_network.models.vanillanet1 import VanillaNet1
 from trailer_pose_network.trainer import Trainer
 
