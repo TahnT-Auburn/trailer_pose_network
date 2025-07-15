@@ -1,0 +1,16 @@
+﻿net,name,parameters,gflops,top_1_acc
+resnet18,ResNet-18,1.17E+07,1.80E+00,69.758
+resnet34,ResNet-34,2.18E+07,3.66E+00,73.314
+mobilenetv2,MobileNetV2,3.50E+06,3.00E-01,71.878
+inceptionv3,Inception-v3,2.72E+07,5.71E+00,77.294
+googlenet,GoogLeNet,6.60E+06,1.50E+00,69.778
+densenet121,DenseNet-121,8.00E+06,2.83E+00,74.434
+resnet50,ResNet-50,2.56E+07,4.09E+00,76.13
+resnet101,ResNet-101,4.45E+07,7.80E+00,77.374
+resnet152,ResNet-152,6.02E+07,1.15E+01,78.312
+densenet169,DenseNet-169,1.41E+07,3.36E+00,75.6
+densenet201,DenseNet-201,2.00E+07,4.29E+00,76.896
+densenet264,DenseNet-264,2.92E+07,5.60E+00,80.7
+vgg16,VGG-16,1.38E+08,1.55E+01,71.592
+vgg19,VGG-19,1.44E+08,1.96E+01,72.376
+alexnet,AlexNet,6.11E+07,7.10E-01,56.522
