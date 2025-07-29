@@ -17,27 +17,27 @@ from torch.utils.data import Dataset, DataLoader, random_split
 import pytorch_warmup as warmup
 
 from trailer_pose_network.data_setup import TractorTrailerData
-from trailer_pose_network.models.space_time_encoder import SpaceTimeEncoder
-from trailer_pose_network.models.space_time_early_fusion import SpaceTimeEncoderEarlyFusion
+from trailer_pose_network.models.spacetime.space_time_encoder import SpaceTimeEncoder
+from trailer_pose_network.models.spacetime.space_time_early_fusion import SpaceTimeEncoderEarlyFusion
 
 from trailer_pose_network.trainer import Trainer
 from sklearn.model_selection import train_test_split
 
 #%%
 # Generate dataloaders
-IN_PARENT = "C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\data\\simulation\\training\\"
+IN_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\data\\simulation\\"
 IN_FILE = "full_training.csv"
 TRAIN_CSV = os.path.join(IN_PARENT, IN_FILE)
 SEQ_PARENT = "D:\\TrainingData\\simulation\\processed"
 
-WEIGHT_PARENT = "C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\weights\\tests\\"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\spacetime\\"
 WEIGHT_FILE = "space_time.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 num_frames = 2
 img_size = 224
 full_set = TractorTrailerData(csv_file=TRAIN_CSV,
-                                inputs={"cam":False, "can": True, "imu": True},
+                                inputs={"cam":True, "can": True, "imu": True},
                                 reduce={"target_column":"hitch", "target_size":10000},
                                 transform=transforms.Compose([
                                     transforms.ToPILImage(),
@@ -68,18 +68,18 @@ loader_val = DataLoader(val_set, batch_size=6, shuffle=True)
 #                         in_channels=3,
 #                         embed_dim=384)
 
-model = SpaceTimeEncoder(num_frames=num_frames,
-                        inp_size=(1,4),
-                        patch_size=1,
-                        in_channels=1,
-                        embed_dim=384)
+# model = SpaceTimeEncoder(num_frames=num_frames,
+#                         inp_size=(1,4),
+#                         patch_size=1,
+#                         in_channels=1,
+#                         embed_dim=384)
 
-# model = SpaceTimeEncoderEarlyFusion(num_frames=num_frames,
-#                                     embed_dim=384,
-#                                     img_size=(img_size,img_size), img_patch_size=16, img_channels=3,
-#                                     inp_size=(1,4), inp_patch_size=1, inp_channels=1,
-#                                     num_heads=8, depth=12,
-#                                     attn_drop=0.2, proj_drop=0.2)
+model = SpaceTimeEncoderEarlyFusion(num_frames=num_frames,
+                                    embed_dim=384,
+                                    img_size=(img_size,img_size), img_patch_size=16, img_channels=3,
+                                    inp_size=(1,4), inp_patch_size=1, inp_channels=1,
+                                    num_heads=8, depth=12,
+                                    attn_drop=0.2, proj_drop=0.2)
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print("Device in Use: %s" % device)
@@ -87,7 +87,7 @@ model = model.to(device)
 
 #%%
 # Setup training
-num_epochs = 10
+num_epochs = 3
 num_iters = len(loader_train) * num_epochs
 warmup_period = len(loader_train)//2 # half an epoch
 
@@ -105,7 +105,7 @@ network_trainer = Trainer(model=model,
                           warmup_scheduler=warmup_scheduler,
                           loader_train=loader_train,
                           loader_val=loader_val,
-                          loss_scale=1e1,
+                          loss_scale=1e2,
                           device=device,
                           check_accuracy=True,
                           verbose=len(loader_train),

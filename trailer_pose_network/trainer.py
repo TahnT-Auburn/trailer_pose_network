@@ -197,12 +197,12 @@ class Trainer():
 
             # check the training and validation accuracies at the end of every epoch
             if self.check_accuracy:
-                start_time = time.time()
+                # start_time = time.time()
                 rmse_train, rmse_val = self.checkAccuracy()
                 rmse_train_history.append(rmse_train)
                 rmse_val_history.append(rmse_val)
 
-                tqdm.write(f"Accuracy Check time: {time.time() - start_time}")
+                # tqdm.write(f"Accuracy Check time: {time.time() - start_time}")
                 tqdm.write(f"Training RMSE: {rmse_train}")
                 tqdm.write(f"Validation RMSE: {rmse_val}")
                 print()
@@ -228,11 +228,17 @@ class Trainer():
                 # if np.round(rmse_val) <= 1:
                 #     tqdm.write("Early Stopping Criteria Met. Terminating Training")
                 #     break
-                if rmse_val[0] <= 0.01 and rmse_val[1] <= 0.01:
+                if rmse_val[0] <= 0.001 and rmse_val[1] <= 0.001:
                     tqdm.write("Early Stopping Criteria Met. Terminating Training")
                     break
-            
-            tqdm.write(f"Time per epoch: {time.time()-start_time}")
+                
+                # early stopping due to overfitting
+                # TODO: Hard set early stopping criteria, make a param?
+                if np.linalg.norm(rmse_val) > np.linalg.norm(rmse_train) * 1.5:
+                    tqdm.write("Overfitting detected. Terminating Training")
+                    break
+                
+            tqdm.write(f"Time per epoch: {time.time()-epoch_start_time}")
 
         print("Training Complete")
 

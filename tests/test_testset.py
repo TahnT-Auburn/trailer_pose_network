@@ -20,8 +20,8 @@ import matplotlib.animation as animation
 import time
 
 from trailer_pose_network.custom_transforms import *
-from trailer_pose_network.models.mangonet import MangoNet
-from trailer_pose_network.models.vanillanet1 import VanillaNet1
+from trailer_pose_network.models.misc.mangonet import MangoNet
+from trailer_pose_network.models.misc.vanillanet1 import VanillaNet1
 from trailer_pose_network.data_setup import TrailerData
 
 #%% 

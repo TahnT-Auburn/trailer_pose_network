@@ -47,6 +47,6 @@ def combineCSVs(parent_dir:str, save_dir:str=None):
 #%%
 if __name__ == "__main__":
     PARENT = "D:\\TrainingData\\simulation\\processed"
-    SAVE = "C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\trailer_pose_network\\data\\simulation\\training\\full_training.csv"
+    SAVE = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\data\\simulation\\full_training.csv"
     combineCSVs(PARENT,SAVE)
     

@@ -16,8 +16,8 @@ from torch.utils.data import Dataset, DataLoader, random_split
 import pytorch_warmup as warmup
 
 from trailer_pose_network.data_setup import TractorTrailerData
-from trailer_pose_network.models.space_time_encoder import SpaceTimeEncoder
-from trailer_pose_network.models.space_time_early_fusion import SpaceTimeEncoderEarlyFusion
+from trailer_pose_network.models.spacetime.space_time_encoder import SpaceTimeEncoder
+from trailer_pose_network.models.spacetime.space_time_early_fusion import SpaceTimeEncoderEarlyFusion
 from trailer_pose_network.trainer import Trainer
 from sklearn.model_selection import train_test_split
 
