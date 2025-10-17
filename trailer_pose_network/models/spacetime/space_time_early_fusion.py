@@ -48,7 +48,7 @@ class PatchEmbed(nn.Module):
         # W = x.size(-1)
         x = x.flatten(2).transpose(1, 2)
         return x
-
+    
 class Attention(nn.Module):
     '''
     Standard attention block. Applicable for both single and multi-head attention.

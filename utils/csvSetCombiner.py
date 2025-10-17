@@ -34,7 +34,7 @@ def combineCSVs(parent_dir:str, save_dir:str=None):
         #     header = 'infer'
         # else:
         #     header = 'infer'
-        df = pd.read_csv(path, header='infer')
+        df = pd.read_csv(path, dtype={"SUBSET":str}, header='infer')
         dfs.append(df)
 
     # concatentate dataframes
@@ -46,7 +46,7 @@ def combineCSVs(parent_dir:str, save_dir:str=None):
 
 #%%
 if __name__ == "__main__":
-    PARENT = "D:\\TrainingData\\simulation\\processed"
-    SAVE = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\data\\simulation\\full_training.csv"
+    PARENT = "D:\\TrainingData\\simulation\\processed_10Hz"
+    SAVE = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\data\\simulation\\downsampled\\full_training_downsampled.csv"
     combineCSVs(PARENT,SAVE)
     

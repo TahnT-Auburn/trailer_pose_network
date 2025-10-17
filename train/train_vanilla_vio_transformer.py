@@ -31,21 +31,23 @@ from trailer_pose_network.models.vio.vanilla_vio_transformer import VanillaVIOTr
 
 #%%
 def main():
-    # Set Paths
-    TRAIN_CSV = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\data\\simulation\\full_training.csv"
-    SEQ_PARENT = "D:\\TrainingData\\simulation\\processed"
-
-    WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\vio\\"
+    #### Set Paths ####
+    TRAIN_CSV = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\data\\experimental\\filtered_imu\\full_training.csv"
+    SEQ_PARENT = "D:\\TrainingData\\experimental\\filtered_imu"
+    # SEQ_PARENT = "D:\\TrainingData\\simulation\\processed"
+    
+    
+    WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\vio\\"
     WEIGHT_FILE = "vanilla_vio_v1.pth"
     WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
-    # Generate Dataloader
+    ##### Generate Dataloader ####
     NUM_FRAMES = 2
     IMG_SIZE = (384,512)
     BATCH_SIZE = 6
 
     full_set = FLownetData(csv_file=TRAIN_CSV,
-                        reduce={"target_column":"yaw", "target_size":10000},
+                        reduce={"target_column":"yaw", "target_size":1000},
                         transform=transforms.Compose([
                             transforms.ToPILImage(),
                             transforms.Resize(IMG_SIZE),
@@ -65,7 +67,7 @@ def main():
     loader_val = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
     # loader_tiny = DataLoader(tiny_set, batch_size=6, shuffle=True)s
 
-    # Load Model
+    #### Load Model ####
 
     # set model parameters
     VIS_ENCODER_PARAMS ={
@@ -80,7 +82,7 @@ def main():
         "drop_out": 0.
     }
 
-    EMBED_DIM = 384
+    EMBED_DIM = 768
     NUM_HEADS = 8
     NUM_LAYERS = 12
     PROJ_DROP = 0.
@@ -93,24 +95,27 @@ def main():
                                 attn_drop=ATTN_DROP,
                                 vis_encoder_params=VIS_ENCODER_PARAMS,
                                 inert_encoder_params=INERT_ENCODER_PARAMS,
-                                num_outputs=2)
+                                num_outputs=3)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print("Device in Use: %s" % device)
     model = model.to(device)
 
-    # Setup Training
+    #### Setup Training ####
 
     # set training parameters
-    NUM_EPOCHS = 20
+    NUM_EPOCHS = 10
     LR = 1e-4
-
+    LOSS_SCALE = [1e0, 1e2]
+    LOSS_FUNC = [nn.SmoothL1Loss(), nn.SmoothL1Loss()]
+    
     num_iters = len(loader_train) * NUM_EPOCHS
     warmup_period = len(loader_train) # half an epoch
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=(0.9, 0.999), weight_decay=0.05)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=(0.9, 0.999), weight_decay=0.01)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.1)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    warmup_period = len(loader_train) * 2 # half an epoch
     warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
 
     network_trainer = Trainer(model=model,
@@ -119,16 +124,16 @@ def main():
                             warmup_scheduler=warmup_scheduler,
                             loader_train=loader_train,
                             loader_val=loader_val,
-                            loss_scale=1e1,
+                            loss_scale=LOSS_SCALE,
                             device=device,
                             check_accuracy=True,
                             verbose=len(loader_train),
-                            save_weights=WEIGHT_SAVE_PATH)
+                            save_weights=None)
 
     print("Training ...")
     print()
     start_time = time.time()
-    outs = network_trainer.train(loss_func=nn.L1Loss(), epochs=NUM_EPOCHS)
+    outs = network_trainer.train(loss_func=LOSS_FUNC, epochs=NUM_EPOCHS)
     print("Training Time: %s" % (time.time() - start_time))
     print()
 
@@ -155,22 +160,29 @@ if __name__ == "__main__":
     plt.show()
 
     L = len(outs["rmse_train_history"])
-    train_rmse = np.concatenate(outs["rmse_train_history"]).reshape(L,2)
-    val_rmse = np.concatenate(outs["rmse_val_history"]).reshape(L,2)
+    train_rmse = np.concatenate(outs["rmse_train_history"]).reshape(L,3)
+    val_rmse = np.concatenate(outs["rmse_val_history"]).reshape(L,3)
     hitch_rmse_train = train_rmse[:,0]
     hitch_rmse_val = val_rmse[:,0]
     hr_rmse_train = train_rmse[:,1]
     hr_rmse_val = val_rmse[:,1]
-    plt.subplot(2,1,1)
+    state3_rmse_train = train_rmse[:,2]
+    state3_rmse_val = val_rmse[:,2]
+    plt.subplot(3,1,1)
     plt.plot(hitch_rmse_train, '-o')
     plt.plot(hitch_rmse_val, '-o')
     plt.legend(['train', 'val'], loc='upper right')
     plt.ylabel('State1 RMSE [deg]')
     plt.xlabel('Epochs')
-    plt.subplot(2,1,2)
+    plt.subplot(3,1,2)
     plt.plot(hr_rmse_train, '-o')
     plt.plot(hr_rmse_val, '-o')
     plt.ylabel('State2 RMSE [deg/s]')
+    plt.xlabel('Epochs')
+    plt.subplot(3,1,3)
+    plt.plot(state3_rmse_train, '-o')
+    plt.plot(state3_rmse_val, '-o')
+    plt.ylabel('State3 RMSE [deg/s]')
     plt.xlabel('Epochs')
     plt.tight_layout()
     plt.show()

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 #%%
 # load data
-TEST_CSV = "D:\\TestingData\\simulation\\processed\\FF\\FF1\\FF1.csv"
+TEST_CSV = "D:\\TrainingData\\experimental\\40Hz\\original\\6_19_25\\03\\03.csv"
 df = pd.read_csv(TEST_CSV)
 
 #%%
@@ -79,16 +79,22 @@ def compute_abs_pos_error(coords1, coords2):
 if __name__ == "__main__":
     X_est_array = []
     Y_est_array = []
+    dx_body_list = []
+    dy_body_list = []
+    dyaw_list = []
     for i in range(1,len(df)):
         pose_prev = (df.iloc[i-1]["X"], df.iloc[i-1]["Y"], df.iloc[i-1]["yaw"])
         pose_current = (df.iloc[i]["X"], df.iloc[i]["Y"], df.iloc[i]["yaw"])
         
         dx_body, dy_body, dyaw = tangent_to_body_frame_translation(pose_prev, pose_current)
+        dx_body_list.append(dx_body)
+        dy_body_list.append(dy_body)
+        dyaw_list.append(dyaw)
         
         X_est, Y_est = body_to_tangent_frame_translation(pose_prev, dx_body, dy_body)
         X_est_array.append(X_est)
         Y_est_array.append(Y_est)
-    
+
     X_est_array.insert(0,df.iloc[0]["X"])
     Y_est_array.insert(0,df.iloc[0]["Y"])
     
@@ -104,3 +110,13 @@ if __name__ == "__main__":
     plt.plot(error)
     plt.ylabel("Position Error")
     plt.show()
+    
+    plt.subplot(311)
+    plt.plot(dx_body_list)
+    plt.xlabel("dx")
+    plt.subplot(312)
+    plt.plot(dy_body_list)
+    plt.xlabel("dy")
+    plt.subplot(313)
+    plt.plot(dyaw_list)
+    plt.xlabel("dyaw")

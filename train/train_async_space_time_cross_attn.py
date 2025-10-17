@@ -1,0 +1,271 @@
+#%%
+import numpy as np
+import pandas as pd
+import os
+import matplotlib.pyplot as plt
+import time
+
+import torch
+import torch.nn as nn
+from torchvision import transforms
+from torchvision.transforms import v2
+from torch.utils.data import DataLoader, random_split
+import pytorch_warmup as warmup
+
+from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
+from trailer_pose_network.models.spacetime.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
+
+from trailer_pose_network.trainer import Trainer
+
+#%%
+# Set Global variables
+
+# === FILE LOADING ===
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time"
+WEIGHT_FILE = "async_space_time_cross_attn_v2.pth"
+WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+
+PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
+PRETRAINED = True
+
+# === DATALOADER PARAMETERS ===
+NUM_FRAMES = 2
+IMG_SIZE = (224,448)
+BATCH_SIZE = 6
+VAL_RATIO = 0.2
+NUM_WORKERS = 4
+
+# === MODEL PARAMETERS ===
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 8
+DEPTH = 12
+PATCH_SIZE = 16
+IN_CHANNELS = 3
+IMU_CHANNELS = 8
+DROPOUT = 0.
+NUM_OUTPUTS = 3
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 20
+LR = 1e-4
+LOSS_SCALE = [1e0, 3e2]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
+# LOSS_SCALE = 1e1
+# LOSS_FUNC = nn.L1Loss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = True
+CHECK_ACCURACY = True
+CHECK_GRADIENTS = False
+
+#%%
+def train():
+    # Load dataset
+    full_set = AsyncTemporalDataLoader(sequence_root_processed=SEQ_ROOT_PROCESSED,
+                                        sequence_root_raw=SEQ_ROOT_RAW,
+                                        sequential_lookback=NUM_FRAMES,
+                                        inputs={'cam':True, 'can':True, 'imu':True},
+                                        reduce={'target_column':'vx', 'target_size':5000},
+                                        transform_img=v2.Compose([
+                                            v2.ToPILImage(),
+                                            v2.Resize(IMG_SIZE),
+                                            v2.ToTensor(),
+                                        ]),
+                                    )
+    num_val = int(np.round(VAL_RATIO * len(full_set)))
+    num_train = len(full_set) - num_val
+    train_set, val_set = random_split(full_set, [num_train, num_val])
+    
+    # Generate loaders
+    loader_train = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+    loader_val = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+    
+    # Load model
+    model = AsyncSpaceTimeCrossAttention(IMG_SIZE,
+                                         PATCH_SIZE,
+                                         IN_CHANNELS,
+                                         EMBED_DIM,
+                                         NUM_FRAMES,
+                                         NUM_IMU_SAMPLES,
+                                         IMU_CHANNELS,
+                                         NUM_HEADS,
+                                         DEPTH,
+                                         DROPOUT,
+                                         NUM_OUTPUTS)
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print('Device is Use: %s' % device)
+    model = model.to(device)
+    
+    # Load pretrained weights if prompted
+    if PRETRAINED:
+        state_dict = torch.load(PRETRAINED_WEIGHTS)
+        model.load_state_dict(state_dict)
+        
+    # Set up training
+    optimizer = torch.optim.Adam(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    warmup_period = len(loader_train) * WARMUP_PERIOD
+    warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+    
+    network_trainer = Trainer(model=model,
+                              optimizer=optimizer,
+                              scheduler=scheduler,
+                              warmup_scheduler=warmup_scheduler,
+                              loader_train=loader_train,
+                              loader_val=loader_val,
+                              run_val=RUN_VAL,
+                              overfit_detector=OVERFIT_DETECTOR,
+                              loss_scale=LOSS_SCALE,
+                              loss_save_interval=None,
+                              device=device,
+                              check_accuracy=CHECK_ACCURACY,
+                              check_gradients=CHECK_GRADIENTS,
+                              verbose=len(loader_train),
+                              save_weights=SAVE_WEIGHTS)
+    
+    # Train model
+    print('Training ...')
+    print ()
+    
+    start_time = time.time()
+    model, outs = network_trainer.train(loss_func=LOSS_FUNC, epochs=NUM_EPOCHS)
+    print("Total training time: %s" % (time.time() - start_time))
+    print()
+    print("Training Complete")
+    print()
+    
+    return model, outs
+
+#%%
+# Call training and visualize training
+if __name__ == "__main__":
+    
+    model, outs = train()
+    
+    if RUN_VAL:
+        # plot loss
+        plt.subplot(4,1,1)
+        plt.plot(outs["lr_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Learning Rate')
+        plt.subplot(4,1,2)
+        plt.plot(outs["train_loss_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Training Loss')
+        plt.subplot(4,1,3)
+        plt.plot(outs["val_loss_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Validation Loss')
+        plt.subplot(4,1,4)
+        plt.plot(outs["train_epoch_loss_history"], '-o')
+        plt.plot(outs["val_epoch_loss_history"])
+        plt.legend(["Train", "Val"])
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+    else:
+        plt.subplot(3,1,1)
+        plt.plot(outs["lr_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Learning Rate')
+        plt.subplot(3,1,2)
+        plt.plot(outs["train_loss_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Training Loss')
+        plt.subplot(3,1,3)
+        plt.plot(outs["train_epoch_loss_history"], '-o')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+    plt.tight_layout()
+    plt.show()
+
+    if RUN_VAL:
+        plt.subplot(411)
+        plt.plot(outs["train_loss1_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Train Loss1 (Trans)')
+        plt.subplot(412)
+        plt.plot(outs["train_loss2_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Train Loss2 (Rot)')
+        plt.subplot(413)
+        plt.plot(outs["val_loss1_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Val Loss1 (Trans)')
+        plt.subplot(414)
+        plt.plot(outs["val_loss2_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Val Loss2 (Rot)')
+    else:
+        plt.subplot(211)
+        plt.plot(outs["train_loss1_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Train Loss1 (Trans)')
+        plt.subplot(212)
+        plt.plot(outs["train_loss2_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Train Loss2 (Rot)')
+    plt.tight_layout()
+    plt.show()
+    
+    # plot gradients
+    if CHECK_GRADIENTS:
+        plt.plot(outs["layer_idx"], outs["avg_grads"], marker="x")
+        plt.xlabel('Layer Depth')
+        plt.ylabel('Average Gradients')
+        plt.tight_layout()
+        plt.show()
+        
+    # plot accuracies
+    if CHECK_ACCURACY:
+        L = len(outs["rmse_train_history"])
+        train_rmse = np.concatenate(outs["rmse_train_history"]).reshape(L,NUM_OUTPUTS)
+        if RUN_VAL: 
+            val_rmse = np.concatenate(outs["rmse_val_history"]).reshape(L,NUM_OUTPUTS)
+        
+        # Loop truth and plot each output as a subplot
+        for i in range(NUM_OUTPUTS):
+            plt.subplot(NUM_OUTPUTS,1,i+1)
+            plt.plot(train_rmse[:,i], '-o')
+            if RUN_VAL:
+                plt.plot(val_rmse[:,i], '-o')
+                plt.legend(['Train', 'Val'])
+            state_num = str(i+1)
+            plt.ylabel('OUTPUT' + state_num + ' RMSE')
+            plt.xlabel('Epochs')
+            
+
+    
+        # hitch_rmse_train = train_rmse[:,0]
+        # hr_rmse_train = train_rmse[:,1]
+        # hitch_rmse_val = val_rmse[:,0]
+        
+        # hr_rmse_val = val_rmse[:,1]
+        # state3_rmse_train = train_rmse[:,2]
+        # state3_rmse_val = val_rmse[:,2]
+        # plt.subplot(3,1,1)
+        # plt.plot(hitch_rmse_train, '-o')
+        # plt.plot(hitch_rmse_val, '-o')
+        # plt.legend(['train', 'val'], loc='upper right')
+        # plt.ylabel('Hitch RMSE [deg]')
+        # plt.xlabel('Epochs')
+        # plt.subplot(3,1,2)
+        # plt.plot(hr_rmse_train, '-o')
+        # plt.plot(hr_rmse_val, '-o')
+        # plt.ylabel('Hitch Rate RMSE [deg/s]')
+        # plt.xlabel('Epochs')
+        # plt.tight_layout()
+        # plt.subplot(3,1,3)
+        # plt.plot(state3_rmse_train, '-o')
+        # plt.plot(state3_rmse_val, '-o')
+        # plt.ylabel('State3 RMSE [deg/s]')
+        # plt.xlabel('Epochs')
+        # plt.tight_layout()
+        # plt.show()

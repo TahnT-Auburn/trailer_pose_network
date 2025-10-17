@@ -170,7 +170,7 @@ class SpaceTimeTransformerBlock(nn.Module):
         return x
 
 class SpaceTimeEncoder(nn.Module):
-    def __init__(self, num_frames:int=8, inp_size:tuple=(224,224), patch_size:int=16, in_channels:int=3, embed_dim:int=384,
+    def __init__(self, num_frames:int=8, num_outputs:int=1, inp_size:tuple=(224,224), patch_size:int=16, in_channels:int=3, embed_dim:int=384,
                   num_heads:int=8, depth:int=12, attn_drop:float=0., proj_drop:float=0.):
         super().__init__()
         self.num_frames = num_frames
@@ -214,7 +214,7 @@ class SpaceTimeEncoder(nn.Module):
             nn.GELU(),
             nn.Linear(embed_dim*2, embed_dim),
             nn.GELU(),
-            nn.Linear(embed_dim, 2)
+            nn.Linear(embed_dim, num_outputs)
 
         )
 

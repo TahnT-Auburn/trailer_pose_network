@@ -1,0 +1,43 @@
+Weight path: "C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\vio\vanilla_vio_v1.pth"
+Outputs = [dx_body, dy_body]
+RMSES at final checkpoint:
+	Training RMSE: [0.00133403 0.00296627]
+	Validation RMSE: [0.00134422 0.00304992]
+
+Dataloader Parameters:
+    NUM_FRAMES = 2
+    IMG_SIZE = (384,512)
+    BATCH_SIZE = 6
+    reduce={"target_column":"yaw", "target_size":10000},
+
+Model Parameters:
+    VIS_ENCODER_PARAMS ={
+        "weights": "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\flownet\\FlowNetPytorch\\weights\\flownetc_EPE1.766.pth",
+        "img_size": IMG_SIZE,
+        "patch_size": 1,
+    }
+    INERT_ENCODER_PARAMS = {
+        "num_features": 8,
+        "num_sequence": 2,
+        "drop_out": 0.
+    }
+    EMBED_DIM = 384
+    NUM_HEADS = 8
+    NUM_LAYERS = 12
+    PROJ_DROP = 0.
+    ATTN_DROP = 0.
+
+Training Parameters:
+    NUM_EPOCHS = 20
+    LR = 1e-4
+    LOSS_SCALE = 1e1
+    LOSS_FUNC = nn.L1Loss()
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=(0.9, 0.999), weight_decay=0.05)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    warmup_period = len(loader_train) # half an epoch
+    warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- First working rendition of VIO transformer on relative body frame displacements.
+- Trained on simulated data

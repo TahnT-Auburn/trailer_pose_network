@@ -20,11 +20,11 @@ from trailer_pose_network.models.vio.vanilla_vio_transformer import VanillaVIOTr
 
 #%%
 # Set Paths
-TEST_CSV = "D:\\TestingData\\simulation\\processed\\INT\\INT1\\INT1.csv"
-SEQ_PARENT = "D:\\TestingData\\simulation\\processed\\INT\\INT1"
+TEST_CSV = "D:\\TestingData\\simulation\\processed\\FF\\FF1\\FF1.csv"
+SEQ_PARENT = "D:\\TestingData\\simulation\\processed\\FF\\FF1"
 
 WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\vio\\"
-WEIGHT_FILE = "vanilla_vio_v1.pth"
+WEIGHT_FILE = "vanilla_vio_v3.pth"
 WEIGHTS = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 # Generate Dataloader
@@ -78,7 +78,7 @@ def main():
                                 attn_drop=ATTN_DROP,
                                 vis_encoder_params=VIS_ENCODER_PARAMS,
                                 inert_encoder_params=INERT_ENCODER_PARAMS,
-                                num_outputs=2)
+                                num_outputs=3)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print("Device in Use: %s" % device)
@@ -163,17 +163,24 @@ if __name__ == "__main__":
     
     dx_body = est_array[:,0]
     dy_body = est_array[:,1]
+    dyaw = est_array[:,2]
     
     df = pd.read_csv(TEST_CSV)
     X_est_array = []
     Y_est_array = []
+    yaw_est_array = []
     X_est_array.insert(0,df.iloc[0]["X"])
     Y_est_array.insert(0,df.iloc[0]["Y"])
+    yaw_est_array.insert(0,df.iloc[0]["yaw"])
+    
     for i in range(1,len(df)):
-        pose_prev = (X_est_array[i-1], Y_est_array[i-1], df.iloc[i-1]["yaw"])
+        pose_prev = (X_est_array[i-1], Y_est_array[i-1], yaw_est_array[i-1])
         X_est, Y_est =  body_to_tangent_frame_translation(pose_prev, dx_body=dx_body[i-1], dy_body=dy_body[i-1])
+        yaw_est = yaw_est_array[i-1] + dyaw[i-1]
+        
         X_est_array.append(X_est)
         Y_est_array.append(Y_est)
+        yaw_est_array.append(yaw_est)
         
     # visualize
     plt.plot(X_est_array, Y_est_array)
@@ -183,17 +190,27 @@ if __name__ == "__main__":
     plt.legend(["Est", "Truth"])
     plt.show()
     
+    plt.plot(yaw_est_array)
+    plt.plot(df["yaw"])
+    plt.ylabel("Yaw prediction")
+    plt.show()
+    
     error = compute_abs_pos_error((df["X"],df["Y"]), (X_est_array, Y_est_array))
     plt.plot(error)
     plt.ylabel("Position Error")
     plt.show()
-    # # plots
+    # plots
     
     # hitch_est = est_array[:,0]
     # hr_est = est_array[:,1]
     # hitch_truth = truth_array[:,0]
     # hr_truth = truth_array[:,1]
 
+    # hitch_est = np.rad2deg(hitch_est)
+    # hr_est = np.rad2deg(hr_est)
+    # hitch_truth = np.rad2deg(hitch_truth)
+    # hr_truth = np.rad2deg(hr_truth)
+        
     # plt.subplot(211)
     # plt.plot(hitch_truth,'r')
     # plt.plot(hitch_est,'k')

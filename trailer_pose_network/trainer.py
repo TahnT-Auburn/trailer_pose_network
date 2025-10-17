@@ -22,6 +22,15 @@ import numpy as np
 import pandas as pd
 import time
 from tqdm import tqdm
+import copy
+import keyboard
+
+from trailer_pose_network.gradient_hooks import (
+    hook_forward,
+    hook_backward,
+    get_all_layers,
+    get_grads,
+)
 
 class Trainer():
     '''
@@ -60,9 +69,13 @@ class Trainer():
                        loader_val,
                        warmup_scheduler=None,
                        scheduler=None,
+                       run_val:bool=False,
+                       overfit_detector:bool=False,
                        loss_scale=1,
+                       loss_save_interval:int=None,
                        device=torch.device('cpu'),
                        check_accuracy:bool=False,
+                       check_gradients:bool=False,
                        verbose:int=100,
                        save_weights:str=None,
                        save_outs:str=None):
@@ -73,9 +86,13 @@ class Trainer():
         self.loader_val = loader_val
         self.scheduler = scheduler
         self.warmup_scheduler = warmup_scheduler
+        self.run_val = run_val
+        self.overfit_detector = overfit_detector
         self.loss_scale = loss_scale
+        self.loss_save_interval = loss_save_interval
         self.device = device
         self.check_accuracy = check_accuracy
+        self.check_gradients = check_gradients
         self.verbose = verbose
         self.save_weights = save_weights
         self.save_outs = save_outs
@@ -83,6 +100,8 @@ class Trainer():
         # apply input assertions
         if save_weights is not None and check_accuracy is False:
             raise Exception("save_weights path given but check_accuracy flag is None. Weights are saved by validation accuracy checkpoints. check_accuray must be set to True.")
+        if save_weights is not None and run_val is False:
+            raise Exception("save_weights path given but run_val flag is None. Weights are saved by validation accuracy checkpoints. run_val must be set to True.")
         
     def train(self, loss_func, params=None, epochs=1):
         '''
@@ -98,25 +117,55 @@ class Trainer():
 
         # initilize histories
         lr_history = []
-        raw_loss_history = []
-        loss_history = []
+        train_loss_history = []
+        train_loss1_history = []
+        train_loss2_history = []
+        train_epoch_loss_history = []
         rmse_train_history = []
-        rmse_val_history = []
-        std_train_history = []
-        std_val_history = []
+        if self.run_val:
+            val_loss_history = []
+            val_loss1_history = []
+            val_loss2_history = []
+            val_epoch_loss_history = []
+            rmse_val_history = []
+        
         initial_loss = None
 
         self.model = self.model.to(device=self.device)
-
+        
+        # Set up hooks if prompted
+        if self.check_gradients:
+            # register hooks
+            layers, grads = get_all_layers(self.model, hook_forward, hook_backward)
+        
+        break_outer = False
         for e in range(epochs):
             epoch_start_time = time.time()
-            print("Epoch %d/%d" % ((e+1),epochs))
+            print("\nEpoch %d/%d" % ((e+1),epochs))
             print('-----')
             # start_time = time.time()
+            
+            # Press 'esc' to break loop
+            if keyboard.is_pressed('esc'):
+                print('"esc" detected. Exiting training.')
+                break
+            # maunual training termination
+            if break_outer:
+                break
+            
+            #------------------------TRAINING LOOP--------------------------
+            if self.check_accuracy: # initialize/clear estimates and truth list for each epoch
+                train_est_history = []
+                train_truth_history = []
+                val_est_history = []
+                val_truth_history = []
+                
             for t, (x,y) in enumerate(tqdm(self.loader_train)):
-                # print(f"loop restart time: {time.time()-start_time}")
-                # start_time = time.time()
-                # start_time = time.time()
+                # Press 'esc' to break loop
+                if keyboard.is_pressed('esc'):
+                    print('"esc" detected. Exiting training.')
+                    break_outer = True
+                    break
                 self.model.train()
                 # NOTE: x are the images
                 #       y are the estimates
@@ -132,6 +181,10 @@ class Trainer():
 
                 y = y.to(device=self.device, dtype=torch.float32)
 
+                # clear grads
+                if self.check_gradients:
+                    grads.clear()
+                
                 # call model to estimate
                 est = self.model(x)
                 if isinstance(est, torchvision.models.inception.InceptionOutputs):
@@ -143,34 +196,43 @@ class Trainer():
                 lr = getLR(optimizer=self.optimizer)
                 lr_history.append(lr)
 
-                # compute loss
-                # loss = loss_func(**params)
-                # loss_fun = nn.L1Loss()
-                # loss_fun = manual_mse_loss
-                loss = loss_func(est, y)
-                loss = self.loss_scale * loss
-                # sum loss across states
-                # loss = loss.sum()
-                # if initial_loss is None:
-                #     initial_loss = loss.item()
-                #     loss_history.append(initial_loss)
-                raw_loss_history.append(loss.detach())
-
+                # loss1 = loss_func[0](est[:,0:2], y[:,0:2])
+                loss1 = loss_func[0](est[0], y[:,0:2])
+                loss1 = self.loss_scale[0] * loss1
+                
+                # loss2 = loss_func[1](est[:,2:], y[:,2:])
+                loss2 = loss_func[1](est[1], y[:,2:])
+                loss2 = self.loss_scale[1] * loss2
+                
+                loss = loss1 + loss2
+                # loss = loss_func(est,y)
+                # loss = self.loss_scale * loss
+                
                 # zero out all gradients for the variables which the optimizer will update
                 self.optimizer.zero_grad()
                 # perform backward pass
                 loss.backward()
+                
+                # Clip gradient
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
                 # update the model using the computed gradients
                 self.optimizer.step()
-
-                # verbose updates
-                if self.verbose is not None and t % self.verbose == 0:
-                    tqdm.write('Iteration %d, loss = %.4f' % (t,loss.detach().item()))
+                
+                # log loss to history (if save interval not given then all losses are saved which can be expensive)
+                if self.loss_save_interval is None:
+                    train_loss1_history.append(loss1.detach())
+                    train_loss2_history.append(loss2.detach())
+                    train_loss_history.append(loss.detach())
+                elif self.loss_save_interval is not None and t % self.loss_save_interval == 0:
+                    train_loss1_history.append(loss1.detach())
+                    train_loss2_history.append(loss2.detach())
+                    train_loss_history.append(loss.detach())
 
                 # step warmup scheduler and regular scheduler given specified order and delays
                 # TODO: Make this more robust. Currently assumes scheduler steps per iteration.
                 #       Works for cosine annealing schedulers but not step schedulers. Could make it an input.
-
+                #-------------------------------------------
                 # if both are given
                 if self.warmup_scheduler is not None and self.scheduler is not None:
                     # default is to delay the learning rate scheduler by the warmup period
@@ -185,177 +247,201 @@ class Trainer():
                 # only scheduler is given
                 elif self.warmup_scheduler is None and self.scheduler is not None:
                     self.scheduler.step()
-                # print(f"Time per iteration: {time.time()-start_time}\n")
-                # start_time = time.time()
-
+                    
+                # Append estimates and truths if using for accuracy checking
+                if self.check_accuracy:
+                    est =  torch.cat((est[0], est[1]), dim=1)
+                    train_est_history.append(est.detach())
+                    train_truth_history.append(y.detach())  
+                    
+            # append per epoch loss history at end of training loop
+            train_epoch_loss_history.append(loss.detach())
+            
+            # verbose updates
+            if self.verbose is not None:
+                tqdm.write('Epoch %d, train loss = %.4f' % (e+1,loss.detach().item()))
+            #------------------------END OF TRAINING LOOP--------------------------
                 
+            #------------------------VALIDATION LOOP--------------------------
+            if self.run_val:
+                with torch.no_grad():
+                    self.model.eval()
+                    for t, (x,y) in enumerate(tqdm(self.loader_val)):
+                    # Press 'esc' to break loop
+                        if keyboard.is_pressed('esc'):
+                            print('"esc" detected. Exiting training.')
+                            break_outer = True
+                            break
+                        # NOTE: x are the images
+                        #       y are the estimates
+                        if isinstance(x,list):
+                            if len(x) == 2:
+                                x[0] = x[0].to(device=self.device, dtype=torch.float32)
+                                x[1] = x[1].to(device=self.device, dtype=torch.float32)
+                            else:
+                                x = x[0] # grab first TODO: Modify this to be more interactive. Make num_inputs a parameter
+                                x = x.to(device=self.device, dtype=torch.float32)
+                        else:
+                            x = x.to(device=self.device, dtype=torch.float32)
 
-            # append histories per epoch
-            loss_history.append(loss.detach())
-        
-            # print(f"Time per epoch: {time.time()-start_time}")
+                        y = y.to(device=self.device, dtype=torch.float32)
 
-            # check the training and validation accuracies at the end of every epoch
+                        # call model to estimate
+                        est = self.model(x)
+                        if isinstance(est, torchvision.models.inception.InceptionOutputs):
+                            est = est[0]
+                            
+                        # loss1 = loss_func[0](est[:,0:2], y[:,0:2])
+                        loss1 = loss_func[0](est[0], y[:,0:2])
+                        loss1 = self.loss_scale[0] * loss1
+                        
+                        # loss2 = loss_func[1](est[:,2:], y[:,2:])
+                        loss2 = loss_func[1](est[1], y[:,2:])
+                        loss2 = self.loss_scale[1] * loss2
+                        
+                        loss = loss1 + loss2
+                        # loss = loss_func(est,y)
+                        # loss = self.loss_scale * loss
+                        
+                        # log loss to history (if save interval not given then all losses are saved which can be expensive)
+                        if self.loss_save_interval is None:
+                            val_loss1_history.append(loss1.detach())
+                            val_loss2_history.append(loss2.detach())
+                            val_loss_history.append(loss.detach())
+                        elif self.loss_save_interval is not None and t % self.loss_save_interval == 0:
+                            val_loss1_history.append(loss1.detach())
+                            val_loss2_history.append(loss2.detach())
+                            val_loss_history.append(loss.detach())
+
+                        # check the training and validation accuracies at the end of every epoch
+                        if self.check_accuracy:
+                            est =  torch.cat((est[0], est[1]), dim=1)
+                            val_est_history.append(est)
+                            val_truth_history.append(y)
+                            
+                    # append loss history per epoch
+                    val_epoch_loss_history.append(loss.detach())
+            
+                # verbose updates
+                if self.verbose is not None:
+                    tqdm.write('Epoch %d, val loss = %.4f' % (e+1,loss.detach().item()))
+            #------------------------------ END OF VAL LOOP --------------------------
+            
+            
+            #--------------- GET ACCURACIES, EARLY STOPPING, OVERFIT DETECTOR, AND SAVE WEIGHTS ---------------
             if self.check_accuracy:
-                # start_time = time.time()
-                rmse_train, rmse_val = self.checkAccuracy()
-                rmse_train_history.append(rmse_train)
-                rmse_val_history.append(rmse_val)
-
-                # tqdm.write(f"Accuracy Check time: {time.time() - start_time}")
+                rmse_train = checkAccuracy(train_est_history, train_truth_history)
                 tqdm.write(f"Training RMSE: {rmse_train}")
-                tqdm.write(f"Validation RMSE: {rmse_val}")
-                print()
-
-                # save weights at lowest val RMSE checkpoint
-                if self.save_weights is not None:
-                    if e == 0: # initialize best rmse to first rmse
+                rmse_train_history.append(rmse_train)
+                if self.run_val:
+                    rmse_val = checkAccuracy(val_est_history, val_truth_history)
+                    tqdm.write(f"Validation RMSE: {rmse_val}")
+                    rmse_val_history.append(rmse_val)
+            
+                # Overfit detector
+                # TODO: Make configurable and more robust
+                if self.overfit_detector:
+                    if np.linalg.norm(rmse_val) > np.linalg.norm(rmse_train) * 1.5:
+                        tqdm.write("Overfitting detected. Terminating Training")
+                        break
+                
+            # Save weights based on best validation RMSE
+            if self.save_weights is not None:
+                if e == 0: # initialize best rmse to first rmse
+                    best_val_rmse = rmse_val
+                    tqdm.write("Checkpoint reached, saving weights ...")
+                    torch.save(self.model.state_dict(), self.save_weights)
+                    tqdm.write("Weights saved to: %s" % self.save_weights)
+                else:
+                    if np.linalg.norm(rmse_val) < np.linalg.norm(best_val_rmse):
                         best_val_rmse = rmse_val
                         tqdm.write("Checkpoint reached, saving weights ...")
                         torch.save(self.model.state_dict(), self.save_weights)
                         tqdm.write("Weights saved to: %s" % self.save_weights)
-                    else:
-                        if np.linalg.norm(rmse_val) < np.linalg.norm(best_val_rmse):
-                            best_val_rmse = rmse_val
-                            tqdm.write("Checkpoint reached, saving weights ...")
-                            torch.save(self.model.state_dict(), self.save_weights)
-                            tqdm.write("Weights saved to: %s" % self.save_weights)
-
-                # early stopping 
-                # TODO: Change to adapt to multiple inputs and thresholds
-                # TODO: Integrate an overfit catcher and deploy early stopping
-                # if np.round(rmse_val[0]) <= 1 and np.round(rmse_val[1]) <= 1:
-                # if np.round(rmse_val) <= 1:
-                #     tqdm.write("Early Stopping Criteria Met. Terminating Training")
-                #     break
-                if rmse_val[0] <= 0.001 and rmse_val[1] <= 0.001:
-                    tqdm.write("Early Stopping Criteria Met. Terminating Training")
-                    break
-                
-                # early stopping due to overfitting
-                # TODO: Hard set early stopping criteria, make a param?
-                if np.linalg.norm(rmse_val) > np.linalg.norm(rmse_train) * 1.5:
-                    tqdm.write("Overfitting detected. Terminating Training")
-                    break
-                
-            tqdm.write(f"Time per epoch: {time.time()-epoch_start_time}")
-
-        print("Training Complete")
+            
+            # TODO: Add early stopping logic
+            
+            # -------------------- CLEAN EPOCH ------------------------
+            # Delete variables for memory management
+            del loss, loss1, loss2, est
+            if self.check_accuracy:
+                del  rmse_train
+                if self.run_val:
+                    del rmse_val
+                 
+            tqdm.write(f"Time per epoch: {time.time()-epoch_start_time}\n")
+            # -------------------- END EPOCH ------------------------
+        
+        print("\nTraining Complete\n")
 
         # convert loss list to cpu
-        raw_loss_history = torch.stack(raw_loss_history).cpu().numpy()
-        loss_history = torch.stack(loss_history).cpu().numpy() if epochs>1 else loss_history[0].item()
+        train_loss_history = torch.stack(train_loss_history).cpu().numpy()
+        train_epoch_loss_history = torch.stack(train_epoch_loss_history).cpu().numpy() if epochs>1 else train_epoch_loss_history[0].item()
+        train_loss1_history = torch.stack(train_loss1_history).cpu().numpy()
+        train_loss2_history = torch.stack(train_loss2_history).cpu().numpy()
 
-
-        # package outs dict for returns
-        if self.check_accuracy:
-            outs = {"lr_history": lr_history,
-                    "raw_loss_history": raw_loss_history,
-                    "loss_history": loss_history,
-                    "rmse_train_history": rmse_train_history,
-                    "rmse_val_history": rmse_val_history,}
-        else:
-            outs = {"lr_history": lr_history,
-                    "raw_loss_history": raw_loss_history,
-                    "loss_history": loss_history,}
+        if self.run_val:
+            val_loss_history = torch.stack(val_loss_history).cpu().numpy()
+            val_epoch_loss_history = torch.stack(val_epoch_loss_history).cpu().numpy() if epochs>1 else val_epoch_loss_history[0].item()
+            val_loss1_history = torch.stack(val_loss1_history).cpu().numpy()
+            val_loss2_history = torch.stack(val_loss2_history).cpu().numpy()
+        
+        if self.check_gradients:
+            layer_idx, avg_grads = get_grads(grads)
             
+        # package outs dict for returns
+        outs = {"lr_history": lr_history,
+                "train_loss_history": train_loss_history,
+                "train_loss1_history": train_loss1_history,
+                "train_loss2_history": train_loss2_history,
+                "train_epoch_loss_history": train_epoch_loss_history,
+            }
+        if self.check_accuracy:
+            outs["rmse_train_history"] = rmse_train_history
+        if self.run_val:
+            outs["val_loss_history"] = val_loss_history
+            outs["val_loss1_history"] = val_loss1_history
+            outs["val_loss2_history"] = val_loss2_history
+            outs["val_epoch_loss_history"] = val_epoch_loss_history
+            if self.check_accuracy:
+                outs["rmse_val_history"] = rmse_val_history
+        if self.check_gradients:
+            outs["layer_idx"] = layer_idx
+            outs["avg_grads"] = avg_grads
+               
         if self.save_outs is not None:    
             # df = pd.DataFrame(outs)
             df = pd.DataFrame(dict([(k,pd.Series(v)) for k,v in outs.items()]))
             df.to_csv(self.save_outs["save_path"])
             print("Training outs saved to: %s" % self.save_outs)
 
-        return outs
+        return self.model, outs
     
-    def checkAccuracy(self):
-        '''
-        Checks the accuracy of the network.
+def checkAccuracy(est_history, truth_history):
+    '''
+    Returns the RMSE between an estimated and truth histories. Designed
+    to accept a non-uniform list of batched tensors.
+    Args:
+        est_history (list): Estimated history
+        truth_history (list): Truth history
+    Returns:
+        rmse_val (float): RMSE
+    '''
+    # concat history and convert to numpy
+    est_history = torch.cat(est_history, dim=0)
+    truth_history = torch.cat(truth_history, dim=0)
 
-        Returns:
-            Training accuracy and validation accuracy
-        '''
-        
-        # clear histories and reset values
-        est_train_history = []
-        est_val_history = []
-        truth_train_history = []
-        truth_val_history = []
+    # compute rmse
+    rmse = get_rmse(truth_history, est_history)
 
-        rmse_train = 0
-        rmse_val = 0
-        std_train = 0
-        std_val = 0
-        err_fun = nn.MSELoss()
-        with torch.no_grad():
-            # num_batches = 0   
-            for train_pair,val_pair in tqdm(zip(self.loader_train,self.loader_val), total=len(self.loader_val)):
-                if isinstance(train_pair[0],list):
-                    if len(train_pair[0]) == 2:
-                        train_pair[0][0] = train_pair[0][0].to(device=self.device, dtype=torch.float32)
-                        train_pair[0][1] = train_pair[0][1].to(device=self.device, dtype=torch.float32)
-                    else:
-                        train_pair[0] = train_pair[0][0].to(device=self.device, dtype=torch.float32)
-                    
-                    x_train = train_pair[0]
-                    y_train = train_pair[1].to(device=self.device, dtype=torch.float32)
+    # convert to numpy
+    rmse = rmse.cpu().numpy().squeeze()
 
-                if isinstance(val_pair[0],list):
-                    if len(val_pair[0]) == 2:
-                        val_pair[0][0] = val_pair[0][0].to(device=self.device, dtype=torch.float32)
-                        val_pair[0][1] = val_pair[0][1].to(device=self.device, dtype=torch.float32)
-                    else:
-                        val_pair[0] = val_pair[0][0].to(device=self.device, dtype=torch.float32)
+    # convert delta yaw pred to degrees (NOTE: Hacky)
+    rmse[2] = np.rad2deg(rmse[2])
 
-                    x_val = val_pair[0]
-                    y_val= val_pair[1].to(device=self.device, dtype=torch.float32)
-
-                else:
-                    # siphon pairs and perform device and dtype conversion
-                    x_train = train_pair[0].to(device=self.device, dtype=torch.float32)
-                    y_train = train_pair[1].to(device=self.device, dtype=torch.float32)
-
-                    x_val = val_pair[0].to(device=self.device, dtype=torch.float32)
-                    y_val = val_pair[1].to(device=self.device, dtype=torch.float32)
-
-                # call model, compute estimates
-                est_train = self.model(x_train)
-                est_val = self.model(x_val)
-                
-                if isinstance(est_train, torchvision.models.inception.InceptionOutputs):
-                    est_train = est_train[0]
-
-                if isinstance(est_val, torchvision.models.inception.InceptionOutputs):
-                    est_val = est_val[0]
-
-                # applend estimations and truths for error analysis
-                est_train_history.append(est_train)
-                est_val_history.append(est_val)
-                truth_train_history.append(y_train)
-                truth_val_history.append(y_val)
-
-            # concat history and convert to numpy
-            est_train_history = torch.cat(est_train_history, dim=0)
-            est_val_history = torch.cat(est_val_history, dim=0)
-            truth_train_history = torch.cat(truth_train_history, dim=0)
-            truth_val_history = torch.cat(truth_val_history, dim=0)
-
-            # compute rmse
-            rmse_train = rmse(truth_train_history, est_train_history)
-            rmse_val = rmse(truth_val_history, est_val_history)
-
-            # convert to numpy
-            rmse_train = rmse_train.cpu().numpy().squeeze()
-            rmse_val = rmse_val.cpu().numpy().squeeze()
-
-            # convert to degrees
-            # rmse_train = np.rad2deg(rmse_train)
-            # rmse_val = np.rad2deg(rmse_val)
-            # rmse_train[[2,3,4]] = np.rad2deg(rmse_train[[2,3,4]])
-            # rmse_val[[2,3,4]] = np.rad2deg(rmse_val[[2,3,4]])
-
-        return rmse_train, rmse_val,
+    return rmse
     
-
 
 def getLR(optimizer):
     '''
@@ -364,7 +450,7 @@ def getLR(optimizer):
     # for param
     return optimizer.param_groups[0]['lr']
 
-def rmse(x_true, x_pred, dim=0):
+def get_rmse(x_true, x_pred, dim=0):
     '''
     Calculates root mean squared error (RMSE)
     '''
@@ -376,3 +462,108 @@ def manual_mse_loss(est, truth, dim=0):
     dimension to take the mean along
     '''
     return ((est - truth)**2).mean(dim=dim)
+
+def mse_yaw_angle_loss(pred, target):
+    '''
+    A custom MSE loss designed to handle yaw angle ambiguity
+    '''
+    diff = pred - target
+    diff = torch.atan2(torch.sin(diff), torch.cos(diff))
+    
+    return torch.mean(diff**2)
+
+    # def checkAccuracy(self):
+    #     '''
+    #     Checks the accuracy of the network.
+
+    #     Returns:
+    #         Training accuracy and validation accuracy
+    #     '''
+        
+    #     # clear histories and reset values
+    #     est_train_history = []
+    #     est_val_history = []
+    #     truth_train_history = []
+    #     truth_val_history = []
+
+    #     rmse_train = 0
+    #     rmse_val = 0
+    #     std_train = 0
+    #     std_val = 0
+    #     err_fun = nn.MSELoss()
+    #     with torch.no_grad():
+    #         self.model.eval()
+    #         # num_batches = 0   
+    #         for train_pair,val_pair in tqdm(zip(self.loader_train,self.loader_val), total=len(self.loader_val)):
+    #             if isinstance(train_pair[0],list):
+    #                 if len(train_pair[0]) == 2:
+    #                     train_pair[0][0] = train_pair[0][0].to(device=self.device, dtype=torch.float32)
+    #                     train_pair[0][1] = train_pair[0][1].to(device=self.device, dtype=torch.float32)
+    #                 else:
+    #                     train_pair[0] = train_pair[0][0].to(device=self.device, dtype=torch.float32)
+                    
+    #                 x_train = train_pair[0]
+    #                 y_train = train_pair[1].to(device=self.device, dtype=torch.float32)
+
+    #             if isinstance(val_pair[0],list):
+    #                 if len(val_pair[0]) == 2:
+    #                     val_pair[0][0] = val_pair[0][0].to(device=self.device, dtype=torch.float32)
+    #                     val_pair[0][1] = val_pair[0][1].to(device=self.device, dtype=torch.float32)
+    #                 else:
+    #                     val_pair[0] = val_pair[0][0].to(device=self.device, dtype=torch.float32)
+
+    #                 x_val = val_pair[0]
+    #                 y_val= val_pair[1].to(device=self.device, dtype=torch.float32)
+
+    #             else:
+    #                 # siphon pairs and perform device and dtype conversion
+    #                 x_train = train_pair[0].to(device=self.device, dtype=torch.float32)
+    #                 y_train = train_pair[1].to(device=self.device, dtype=torch.float32)
+
+    #                 x_val = val_pair[0].to(device=self.device, dtype=torch.float32)
+    #                 y_val = val_pair[1].to(device=self.device, dtype=torch.float32)
+
+    #             # call model, compute estimates
+    #             est_train = self.model(x_train)
+    #             est_val = self.model(x_val)
+                
+    #             # concatenate translations rotations to one vector
+    #             est_train =  torch.cat((est_train[0], est_train[1]), dim=1)
+    #             est_val =  torch.cat((est_val[0], est_val[1]), dim=1)
+
+    #             if isinstance(est_train, torchvision.models.inception.InceptionOutputs):
+    #                 est_train = est_train[0]
+
+    #             if isinstance(est_val, torchvision.models.inception.InceptionOutputs):
+    #                 est_val = est_val[0]
+
+    #             # applend estimations and truths for error analysis
+    #             est_train_history.append(est_train.detach())
+    #             est_val_history.append(est_val.detach())
+    #             truth_train_history.append(y_train.detach())
+    #             truth_val_history.append(y_val.detach())
+
+    #         # concat history and convert to numpy
+    #         est_train_history = torch.cat(est_train_history, dim=0)
+    #         est_val_history = torch.cat(est_val_history, dim=0)
+    #         truth_train_history = torch.cat(truth_train_history, dim=0)
+    #         truth_val_history = torch.cat(truth_val_history, dim=0)
+
+    #         # compute rmse
+    #         rmse_train = rmse(truth_train_history, est_train_history)
+    #         rmse_val = rmse(truth_val_history, est_val_history)
+
+    #         # convert to numpy
+    #         rmse_train = rmse_train.cpu().numpy().squeeze()
+    #         rmse_val = rmse_val.cpu().numpy().squeeze()
+
+    #         # convert to degrees
+    #         # rmse_train = np.rad2deg(rmse_train)
+    #         # rmse_val = np.rad2deg(rmse_val)
+    #         rmse_train[2] = np.rad2deg(rmse_train[2])
+    #         rmse_val[2] = np.rad2deg(rmse_val[2])
+    #         # rmse_train[[2,3,4]] = np.rad2deg(rmse_train[[2,3,4]])
+    #         # rmse_val[[2,3,4]] = np.rad2deg(rmse_val[[2,3,4]])
+
+    #     return rmse_train, rmse_val,
+    

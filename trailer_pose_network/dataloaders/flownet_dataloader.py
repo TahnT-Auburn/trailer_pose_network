@@ -14,6 +14,7 @@ import os
 import numpy as np
 import pandas as pd
 import cv2
+import matplotlib.pyplot as plt
 from PIL import Image
 import time
 from sklearn.preprocessing import KBinsDiscretizer
@@ -30,7 +31,7 @@ class FLownetData(Dataset):
         reduce:dict={"target_column":None, "target_size":None},
         transform=None):
 
-        self.df = pd.read_csv(csv_file, header="infer")
+        self.df = pd.read_csv(csv_file, dtype={"SUBSET":str}, header="infer")
         self.original_df = self.df
         self.sequence_root = sequence_root
         self.sequential = sequential
@@ -58,10 +59,6 @@ class FLownetData(Dataset):
                 self.df = self.stratified_sampling_dataframe(df=self.df,
                                                                 target_column=self.reduce["target_column"],
                                                                 target_size=self.reduce["target_size"])
-
-        stop=1
-
-
     def __len__(self):
         return len(self.df)
 
@@ -140,7 +137,7 @@ class FLownetData(Dataset):
                 subset = seq_id[1]
                 #TODO: FIX THIS. 
                 seq_path = os.path.join(self.sequence_root,subset+".csv") if self.single_test else os.path.join(self.sequence_root,set,subset,subset+".csv") 
-                sequence = pd.read_csv(seq_path, header='infer')
+                sequence = pd.read_csv(seq_path, dtype={"SUBSET":str}, header='infer')
 
                 return sequence
         else:
@@ -149,7 +146,7 @@ class FLownetData(Dataset):
                         for file in files:
                                 if file.endswith(".csv"):
                                         seq_path = os.path.join(root,file)
-                                        seq_df = pd.read_csv(seq_path, header='infer')
+                                        seq_df = pd.read_csv(seq_path, dtype={"SUBSET":str}, header='infer')
                                         sequences.append(seq_df)
                 
                 return sequences
@@ -211,16 +208,19 @@ class FLownetData(Dataset):
             # # delX = seq_block["X"].iloc[0] - seq_block["X"].iloc[-1]
             # # delY = seq_block["Y"].iloc[0] - seq_block["Y"].iloc[-1]
             # delyaw = seq_block["yaw"].iloc[0] - seq_block["yaw"].iloc[-1]
+            yaw = seq_block["yaw"].iloc[1]
             hitch = seq_block["hitch"].iloc[-1]
-            hitch_rate = seq_block["hitch_rate"][-1]
-
+            hitch_rate = seq_block["hitch_rate"].iloc[-1]
+            del_hitch = seq_block["hitch"].iloc[1] - seq_block["hitch"].iloc[0]
+            del_hitch_rate = seq_block["hitch_rate"].iloc[1] - seq_block["hitch_rate"].iloc[0]
+            
             pose1 = (seq_block["X"].iloc[0], seq_block["Y"].iloc[0], seq_block["yaw"].iloc[0])
             pose2 = (seq_block["X"].iloc[1], seq_block["Y"].iloc[1], seq_block["yaw"].iloc[1])
             dx_body, dy_body, dyaw = self.tangent_to_body_frame_translation(pose1, pose2)
             
             # out = [delX, delY, delyaw, hitch, hitch_rate]
-            out = [dx_body, dy_body]
-            # out = [hitch, hitch_rate]
+            out = [dx_body, dy_body, dyaw]
+            # out = [del_hitch, hitch_rate]
             # out = [hitch_rate]
             out = torch.as_tensor(out)
 

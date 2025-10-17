@@ -1,0 +1,40 @@
+Weight path: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\spacetime\space_time_cross_attn_v1.pth
+Outputs = [dx_body, dy_body]
+RMSES at final checkpoint:
+	Training RMSE: [0.00107466 0.00258053]
+	Validation RMSE: [0.00102505 0.00256967]
+
+Dataloader Parameters:
+    NUM_FRAMES = 2
+    IMG_SIZE = (224,224)
+    BATCH_SIZE = 6
+    inputs={"cam":True, "can": True, "imu": True},
+    reduce={"target_column":"yaw", "target_size":10000},
+
+Model Parameters:
+    NUM_OUTPUTS = 2
+    EMBED_DIM = 384
+    NUM_HEADS = 8
+    NUM_LAYERS = 12
+    PROJ_DROP = 0.
+    ATTN_DROP = 0
+    IMG_PATCH_SIZE = 16
+    IMG_CHANNELS = 3
+    INERT_PATCH_SIZE = 1
+    INERT_CHANNELS = 1
+    INERT_SIZE = (1,8)
+
+Training Parameters:
+    NUM_EPOCHS = 20
+    LR = 1e-4
+    LOSS_SCALE = 1e1
+    LOSS_FUNC = nn.L1Loss()
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=(0.9, 0.999), weight_decay=0.05)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    warmup_period = len(loader_train)//2 # half an epoch
+    warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Working rendition of a space-time cross attention model for relative body frame dispalcements
+- Trained on simulated data
