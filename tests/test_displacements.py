@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 #%%
 # load data
-TEST_CSV = "D:\\TrainingData\\experimental\\40Hz\\original\\6_19_25\\03\\03.csv"
+TEST_CSV = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\06\\06.csv"
 df = pd.read_csv(TEST_CSV)
 
 #%%

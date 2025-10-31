@@ -14,8 +14,9 @@ import pytorch_warmup as warmup
 
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
 from trailer_pose_network.models.spacetime.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
+from trailer_pose_network.models.spacetime.async_space_time_ca_yaw_hist import AsyncSpaceTimeYawHist
 
-from trailer_pose_network.trainer import Trainer
+from trailer_pose_network.trainers.trainer_async_space_time_ca_yaw_hist import Trainer
 
 #%%
 # Set Global variables
@@ -23,9 +24,11 @@ from trailer_pose_network.trainer import Trainer
 # === FILE LOADING ===
 SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
 SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
+# SEQ_ROOT_PROCESSED = "D:\\TrainingData\\simulation\\10Hz\\"
+# SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time"
-WEIGHT_FILE = "async_space_time_cross_attn_v3.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_yaw_hist"
+WEIGHT_FILE = "async_space_time_yaw_hist_v1.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
 
@@ -44,18 +47,18 @@ NUM_FRAMES = 2
 NUM_IMU_SAMPLES = 5
 EMBED_DIM = 384
 NUM_HEADS = 8
-DEPTH = 12
+DEPTH = 8
 PATCH_SIZE = 16
 IN_CHANNELS = 3
 IMU_CHANNELS = 8
 DROPOUT = 0.
-NUM_OUTPUTS = 3
+NUM_OUTPUTS = 5
 
 # === TRAINING PARAMETERS ===
-NUM_EPOCHS = 60
+NUM_EPOCHS = 15
 LR = 3e-5
-LOSS_SCALE = [1e0, 3e2]
-LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
+LOSS_SCALE = [1e0, 3e2, 1e0]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
 # LOSS_SCALE = 1e1
 # LOSS_FUNC = nn.L1Loss()
 BETAS = (0.9, 0.999)
@@ -72,8 +75,8 @@ def train():
     full_set = AsyncTemporalDataLoader(sequence_root_processed=SEQ_ROOT_PROCESSED,
                                         sequence_root_raw=SEQ_ROOT_RAW,
                                         sequential_lookback=NUM_FRAMES,
-                                        inputs={'cam':True, 'can':True, 'imu':True},
-                                        reduce={'target_column':'steer_ang', 'target_size':10000},
+                                        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':True},
+                                        reduce={'target_column':'steer_ang', 'target_size':5000},
                                         transform_img=v2.Compose([
                                             v2.ToPILImage(),
                                             v2.Resize(IMG_SIZE),
@@ -89,7 +92,7 @@ def train():
     loader_val = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
     
     # Load model
-    model = AsyncSpaceTimeCrossAttention(IMG_SIZE,
+    model = AsyncSpaceTimeYawHist(IMG_SIZE,
                                          PATCH_SIZE,
                                          IN_CHANNELS,
                                          EMBED_DIM,
@@ -187,33 +190,50 @@ if __name__ == "__main__":
     plt.show()
 
     if RUN_VAL:
-        plt.subplot(411)
+        plt.subplot(311)
         plt.plot(outs["train_loss1_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss1 (Trans)')
-        plt.subplot(412)
+        plt.subplot(312)
         plt.plot(outs["train_loss2_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss2 (Rot)')
-        plt.subplot(413)
+        plt.subplot(313)
+        plt.plot(outs["train_loss3_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Train Loss3 (Yaw)')
+        plt.tight_layout()
+        plt.show()
+        
+        plt.subplot(311)
         plt.plot(outs["val_loss1_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss1 (Trans)')
-        plt.subplot(414)
+        plt.subplot(312)
         plt.plot(outs["val_loss2_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss2 (Rot)')
+        plt.subplot(313)
+        plt.plot(outs["val_loss3_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Val Loss3 (Yaw)')
+        plt.tight_layout()
+        plt.show()
     else:
-        plt.subplot(211)
+        plt.subplot(311)
         plt.plot(outs["train_loss1_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss1 (Trans)')
-        plt.subplot(212)
+        plt.subplot(312)
         plt.plot(outs["train_loss2_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss2 (Rot)')
-    plt.tight_layout()
-    plt.show()
+        plt.subplot(313)
+        plt.plot(outs["train_loss3_history"])
+        plt.xlabel('Iterations')
+        plt.ylabel('Train Loss3 (Yaw)')
+        plt.tight_layout()
+        plt.show()
     
     # plot gradients
     if CHECK_GRADIENTS:
@@ -240,32 +260,4 @@ if __name__ == "__main__":
             state_num = str(i+1)
             plt.ylabel('OUTPUT' + state_num + ' RMSE')
             plt.xlabel('Epochs')
-            
-
-    
-        # hitch_rmse_train = train_rmse[:,0]
-        # hr_rmse_train = train_rmse[:,1]
-        # hitch_rmse_val = val_rmse[:,0]
         
-        # hr_rmse_val = val_rmse[:,1]
-        # state3_rmse_train = train_rmse[:,2]
-        # state3_rmse_val = val_rmse[:,2]
-        # plt.subplot(3,1,1)
-        # plt.plot(hitch_rmse_train, '-o')
-        # plt.plot(hitch_rmse_val, '-o')
-        # plt.legend(['train', 'val'], loc='upper right')
-        # plt.ylabel('Hitch RMSE [deg]')
-        # plt.xlabel('Epochs')
-        # plt.subplot(3,1,2)
-        # plt.plot(hr_rmse_train, '-o')
-        # plt.plot(hr_rmse_val, '-o')
-        # plt.ylabel('Hitch Rate RMSE [deg/s]')
-        # plt.xlabel('Epochs')
-        # plt.tight_layout()
-        # plt.subplot(3,1,3)
-        # plt.plot(state3_rmse_train, '-o')
-        # plt.plot(state3_rmse_val, '-o')
-        # plt.ylabel('State3 RMSE [deg/s]')
-        # plt.xlabel('Epochs')
-        # plt.tight_layout()
-        # plt.show()

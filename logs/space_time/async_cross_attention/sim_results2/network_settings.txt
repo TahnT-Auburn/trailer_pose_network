@@ -1,11 +1,10 @@
-Weight path: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\simulation\async_space_time\async_space_time_cross_attn_v1.pth
+Weight path: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\simulation\async_space_time\async_space_time_cross_attn_v2.pth
 Outputs = [dx_body, dy_body, dyaw]
-RMSEs at final checkpoint:
-    Training RMSE: [0.02459319 0.01273958 0.05664105]
-    Validation RMSE: [0.02293324 0.01361173 0.05463567]
+RMSEs at final checkpoint (31 of 60):
+    Training RMSE: [0.02289834 0.01285558 0.06338181]
+    Validation RMSE: [0.02214411 0.01171929 0.06410199]
 
 # === DATALOADER PARAMETERS ===
-sample_size = 10000
 IMG_SIZE = (224,448)
 BATCH_SIZE = 6
 VAL_RATIO = 0.2
@@ -36,3 +35,10 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_dec
 scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
 warmup_period = len(loader_train) * WARMUP_PERIOD
 warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Using pre layer norm version of model
+- Acheives comparable results as post LN version
+- Does well in slow manuevers (turns, intersections)
+- Does poorly in high dynamics ...
+- RMSE plots seem to keep decreasing, could probably train even longer

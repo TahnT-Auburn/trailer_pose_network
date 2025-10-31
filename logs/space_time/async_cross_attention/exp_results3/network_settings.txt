@@ -1,0 +1,53 @@
+Weight path: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\experimental\async_space_time\async_space_time_cross_attn_v3.pth
+Outputs = [dx_body, dy_body, dyaw]
+RMSEs at final checkpoint (Epoch 60 of 60):
+    Training RMSE: [0.017047   0.00525194 0.13407175]
+    Validation RMSE: [0.01802653 0.00554944 0.15062974]
+
+# === FILE LOADING ===
+PRETRAINED = False
+
+# === DATALOADER PARAMETERS ===
+Sample Size: 10000
+NUM_FRAMES = 2
+IMG_SIZE = (224,448)
+BATCH_SIZE = 6
+VAL_RATIO = 0.2
+NUM_WORKERS = 4
+
+# === MODEL PARAMETERS ===
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 8
+DEPTH = 12
+PATCH_SIZE = 16
+IN_CHANNELS = 3
+IMU_CHANNELS = 8
+DROPOUT = 0.
+NUM_OUTPUTS = 3
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 60
+LR = 3e-5
+LOSS_SCALE = [1e0, 3e2]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
+# LOSS_SCALE = 1e1
+# LOSS_FUNC = nn.L1Loss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = False
+CHECK_ACCURACY = True
+CHECK_GRADIENTS = False
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+warmup_period = len(loader_train) * WARMUP_PERIOD
+warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Best working params for the setup so far. Displacements seem to be estimated, and loss is decreasing steadily (could probably train for longer)
+- Estimates are still noisy, especially dyaw making yaw estimates very poor (leading to terrible position estimates). dx_body and dy_body are not awful.
+

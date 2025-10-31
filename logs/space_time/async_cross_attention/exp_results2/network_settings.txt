@@ -1,0 +1,57 @@
+Weight path: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\experimental\async_space_time\async_space_time_cross_attn_v2.pth
+Outputs = [dx_body, dy_body, dyaw]
+RMSEs at final checkpoint (Epoch 29 of 30):
+    Training RMSE: [0.04368607 0.00725673 0.19290599]
+    Validation RMSE: [0.04164201 0.00676428 0.16395772]
+
+# === FILE LOADING ===
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time"
+WEIGHT_FILE = "async_space_time_cross_attn_v2.pth"
+WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+
+PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
+PRETRAINED = False
+
+# === DATALOADER PARAMETERS ===
+NUM_FRAMES = 2
+IMG_SIZE = (224,448)
+BATCH_SIZE = 6
+VAL_RATIO = 0.2
+NUM_WORKERS = 4
+
+# === MODEL PARAMETERS ===
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 8
+DEPTH = 12
+PATCH_SIZE = 16
+IN_CHANNELS = 3
+IMU_CHANNELS = 8
+DROPOUT = 0.
+NUM_OUTPUTS = 3
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 30
+LR = 3e-5
+LOSS_SCALE = [1e0, 3e2]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
+# LOSS_SCALE = 1e1
+# LOSS_FUNC = nn.L1Loss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = False
+CHECK_ACCURACY = True
+CHECK_GRADIENTS = False
+
+Comments:
+- Best "working" model for experimetal data so far. Seems to track deltas but still noisy
+- Any noise in deltas (especially dyaw) will project into large state estimate errors and even larger position errors
+    - Maybe look into a hard prediction (direct position and yaw) approach and provide an "initial/reference" state.
+- Progress nonetheless!

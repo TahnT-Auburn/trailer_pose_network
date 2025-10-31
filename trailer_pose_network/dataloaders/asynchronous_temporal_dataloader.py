@@ -14,7 +14,7 @@ class AsyncTemporalDataLoader(Dataset):
                  sequence_root_processed:str,
                  sequence_root_raw:str,
                  sequential_lookback:int = 2,
-                 inputs:dict = {"cam":True, "can":True, "imu":True},
+                 inputs:dict = {"cam":True, "can":True, "imu":True, "yaw_hist":True},
                  reduce:dict={"target_column":None, "target_size":None},
                  single_test:bool = False,
                  transform_img = None,
@@ -31,7 +31,7 @@ class AsyncTemporalDataLoader(Dataset):
 
         # assert valid input keys
         for input in inputs.keys():
-                if input == "cam" or input == "can" or input == "imu":
+                if input == "cam" or input == "can" or input == "imu" or input == "yaw_hist":
                         pass
                 else:
                         raise Exception("Invalid keys for inputs.")
@@ -93,8 +93,8 @@ class AsyncTemporalDataLoader(Dataset):
         # Find the indices in the raw sequence that match the time values from seq_block
         # NOTE: This works for simulated data where time is perfect.
         # TODO: Find adjustment for experimental data
-        t_series = current_sequence_raw['t_clean']
-        t_to_find = [seq_block['t_clean'].iloc[0], seq_block['t_clean'].iloc[-1]] # Grab the earliest and latest time from seq_block            
+        t_series = current_sequence_raw['t']
+        t_to_find = [seq_block['t'].iloc[0], seq_block['t'].iloc[-1]] # Grab the earliest and latest time from seq_block            
         mask = t_series.isin(t_to_find)
         valid_raw_indices = t_series[mask].index.tolist()
         seq_block_raw = current_sequence_raw.iloc[valid_raw_indices[0]:valid_raw_indices[-1]+1]
@@ -118,33 +118,39 @@ class AsyncTemporalDataLoader(Dataset):
 
             input_cam = torch.stack(concat_images)
             # for image in concat_images:
-                # image = concat_images[0].permute(1,2,0).numpy()
-                # cv2.imshow("test", image)
-                # cv2.waitKey(0)
-                # image = concat_images[1].permute(1,2,0).numpy()
-                # cv2.imshow("tes2", image)
-                # cv2.waitKey(0)
-                # stop=1
+            #     image = concat_images[0].permute(1,2,0).numpy()
+            #     cv2.imshow("test", image)
+            #     cv2.waitKey(0)
+            #     image = concat_images[1].permute(1,2,0).numpy()
+            #     cv2.imshow("tes2", image)
+            #     cv2.waitKey(0)
+            #     stop=1
         # Load CAN and IMU from seq_block_raw
         if self.inputs["can"]:
             input_can = torch.stack([torch.tensor(seq_block_raw["steer_ang"].to_list()),torch.tensor(seq_block_raw["vx"].to_list())]).permute(1,0)
         if self.inputs["imu"]:
             input_imu = torch.stack([torch.tensor(seq_block_raw["imu_accel_x"].to_list()),torch.tensor(seq_block_raw["imu_accel_y"].to_list()),torch.tensor(seq_block_raw["imu_accel_z"].to_list()),
             torch.tensor(seq_block_raw["imu_gyro_x"].to_list()),torch.tensor(seq_block_raw["imu_gyro_y"].to_list()),torch.tensor(seq_block_raw["imu_gyro_z"].to_list())]).permute(1,0)
+        if self.inputs["yaw_hist"]:
+            input_yaw_hist = torch.tensor(seq_block_raw["yaw"].iloc[:-1].to_list()).unsqueeze(1)
+            input_yaw_hist = torch.cat([torch.sin(input_yaw_hist), torch.cos(input_yaw_hist)], dim=1) # use sin and cos of yaw for observability
+        
         
         # generate list of inputs
         inputs = []
         if self.inputs["cam"]:
-                inputs.append(input_cam)
+            inputs.append(input_cam)
         if self.inputs["can"] and self.inputs["imu"]:
-                inputs.append(torch.cat((input_can,input_imu),dim=1))
+            inputs.append(torch.cat((input_can,input_imu),dim=1))
         if self.inputs["can"] and not self.inputs["imu"]:
-                inputs.append(input_can)
+            inputs.append(input_can)
         if self.inputs["imu"] and not self.inputs["can"]:
-                inputs.append(input_imu)
+            inputs.append(input_imu)
+        if self.inputs["yaw_hist"]:
+            inputs.append(input_yaw_hist)
         
         # generate outputs by calling customOuptuts function
-        targets = self.customOutputs(seq_block=seq_block)
+        targets = self.customOutputs(seq_block=seq_block_raw)
         
         # print(f"Image shape: {inputs[0].shape}")
         # print(f"IMU shape: {inputs[1].shape}")
@@ -211,11 +217,13 @@ class AsyncTemporalDataLoader(Dataset):
                     outputs (torch.tensor):
                             Target outputs.
             """
-            pose1 = (seq_block["X"].iloc[-2], seq_block["Y"].iloc[-2], seq_block["yaw"].iloc[-2])
+            pose1 = (seq_block["X"].iloc[0], seq_block["Y"].iloc[0], seq_block["yaw"].iloc[0])
             pose2 = (seq_block["X"].iloc[-1], seq_block["Y"].iloc[-1], seq_block["yaw"].iloc[-1])
             dx_body, dy_body, dyaw = self.tangent_to_body_frame_translation(pose1, pose2)
-            
-            outputs = [dx_body, dy_body, dyaw]
+            yaw = seq_block["yaw"].iloc[-1] # most current yaw to predict
+            sin_yaw = np.sin(yaw) 
+            cos_yaw = np.cos(yaw)
+            outputs = [dx_body, dy_body, dyaw, sin_yaw, cos_yaw]
             outputs = torch.as_tensor(outputs)
             
             return outputs

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 import math
 
-class AsyncSpaceTimeCrossAttention(nn.Module):
+class AsyncSpaceTimeYawHist(nn.Module):
     def __init__(
         self,
         img_size = (224,224),
@@ -28,6 +28,7 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
         self.embed_dim = embed_dim
         self.num_patches = (img_size[0]*img_size[1]) // patch_size ** 2
         self.dropout = nn.Dropout(dropout)
+        self.num_yaw_hist_samples = num_imu_samples - 1 # Assuming we omit the final (current) yaw
         
         # === IMAGE EMBEDDING ===
         # Patch embedding for spatial tokenization
@@ -53,11 +54,22 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
             torch.randn(1, self.num_imu_samples, embed_dim) * 0.02
         )
         
+        # === YAW HISTORY EMBEDDING ===
+        self.yaw_hist_embed = nn.Linear(2, embed_dim)
+        
+        # temporal positional embedding for yaw histories
+        self.yaw_hist_temporal_pos_embedding = nn.Parameter(
+            torch.randn(1, self.num_yaw_hist_samples, embed_dim) * 0.02
+        )
+        
         # === MODALITY TOKENS ===
         self.visual_mod_token = nn.Parameter(
             torch.randn(1, 1, embed_dim) * 0.02
         )
         self.imu_mod_token = nn.Parameter(
+            torch.randn(1, 1, embed_dim) * 0.02
+        )
+        self.yaw_hist_mod_token = nn.Parameter(
             torch.randn(1, 1, embed_dim) * 0.02
         )
         
@@ -69,10 +81,16 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
         
         # === TEMPORAL TRANSFORMER BLOCKS FOR IMU ===
         self.imu_blocks = nn.ModuleList([
-            TemporalBlock(embed_dim, num_heads, dropout=dropout)
+            ImuTemporalBlock(embed_dim, num_heads, dropout=dropout)
             for _ in range(depth)
         ])
 
+        # === TEMPORAL TRANSFORMER BLOCKS FOR YAW HISTORIES ===
+        self.yaw_hist_blocks = nn.ModuleList([
+            YawHistTemporalBlock(embed_dim, num_heads, dropout=dropout)
+            for _ in range(depth)
+        ])
+        
         # === CROSS-MODAL ATTENTION
         self.cross_modal_blocks = nn.ModuleList([
             CrossModalAttention(embed_dim, num_heads, dropout=dropout)
@@ -89,7 +107,7 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
             nn.GELU(),
             nn.Linear(embed_dim * 2, embed_dim),
             nn.GELU(),
-            nn.Linear(embed_dim, 2),
+            nn.Linear(embed_dim, 2), # output dx dy in body frame
         )
 
         self.final_norm_rot = nn.LayerNorm(embed_dim)
@@ -98,7 +116,16 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
             nn.GELU(),
             nn.Linear(embed_dim * 2, embed_dim),
             nn.GELU(),
-            nn.Linear(embed_dim, 1),
+            nn.Linear(embed_dim, 1), # output dyaw
+        )
+        
+        self.final_norm_yaw = nn.LayerNorm(embed_dim)
+        self.network_head_yaw = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 2),
+            nn.GELU(),
+            nn.Linear(embed_dim * 2, embed_dim),
+            nn.GELU(),
+            nn.Linear(embed_dim, 2), # sin cos yaw output 
         )
         
     def embed_images(self, images):
@@ -161,21 +188,45 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
         
         return imu_tokens
     
+    def embed_yaw_hist(self, yaw_histories):
+        """Embeds yaw history input data.
+        
+        Args:
+            yaw_histories (torch.tensor): [B, T, 1] Yaw histories.
+        
+        Returns:
+            yaw_hist_tokens (torch.tensor): [B, T, D] Yaw history tokens.
+        """
+        B, T, _ = yaw_histories.shape
+        
+        # Linear projection to embedding dimension
+        yaw_hist_tokens = self.yaw_hist_embed(yaw_histories)
+        
+        # Add temporal positional embedding
+        yaw_hist_tokens = yaw_hist_tokens + self.yaw_hist_temporal_pos_embedding
+        
+        # Add modality embedding
+        yaw_hist_tokens = yaw_hist_tokens + self.yaw_hist_mod_token.expand(B, -1, -1)
+        
+        return yaw_hist_tokens
+    
     def forward(self, x):
         """Forward block for model.
 
         Args:
-            x (list): List of [B, T, C, H, W] raw images and [B, T, C] raw IMU data as tensors
+            x (list): List of [B, T, C, H, W] raw images, [B, T, C] raw IMU data as tensors and [B, T, 1] yaw histories
         Returns:
             predictions (torch.tensor): model predictions
         """
         images = x[0]
         imu_data = x[1]
+        yaw_histories = x[2]
         B = images.shape[0]
         
         # === EMBEDDING PHASE ===
         visual_tokens = self.embed_images(images)
         imu_tokens = self.embed_imu(imu_data)
+        yaw_hist_tokens = self.embed_yaw_hist(yaw_histories)
         
         # Apply any dropout
         visual_tokens = self.dropout(visual_tokens)
@@ -189,19 +240,24 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
         for block in self.imu_blocks:
             imu_tokens = block(imu_tokens)
         
+        # === YAW HIST TIME ATTENTION ENCODER ===
+        for block in self.yaw_hist_blocks:
+            yaw_hist_tokens = block(yaw_hist_tokens)
+        
         # === CROSS-MODAL FUSION ===
         for cross_block in self.cross_modal_blocks:
-            visual_tokens, imu_tokens = cross_block(visual_tokens, imu_tokens)
+            visual_tokens, imu_tokens, yaw_hist_tokens = cross_block(visual_tokens, imu_tokens, yaw_hist_tokens)
             
         # === FUSION OF VISUAL AND IMU TOKENS ===
-        fused_tokens = self.fusion_strat(visual_tokens, imu_tokens)
+        fused_tokens = self.fusion_strat(visual_tokens, imu_tokens, yaw_hist_tokens)
         
         # === FINAL NETWORK HEAD FOR PREDICTION ===
         trans_predictions = self.network_head_trans(self.final_norm_trans(fused_tokens))
         rot_predictions = self.network_head_rot(self.final_norm_rot(fused_tokens))
+        yaw_predictions = self.network_head_yaw(self.final_norm_yaw(fused_tokens))
         # predictions =  torch.cat((trans_predictions, rot_predictions), dim=1)
         
-        return trans_predictions, rot_predictions
+        return trans_predictions, rot_predictions, yaw_predictions
     
 class SpaceTimeBlock(nn.Module):
     """Factorized space-time attention block"""
@@ -249,7 +305,6 @@ class SpaceTimeBlock(nn.Module):
         x_spatial = self.spatial_norm(x_spatial)
         x_spatial_attn, _ = self.spatial_attn(x_spatial, x_spatial, x_spatial)
         x_spatial = x_spatial_attn + x_spatial # residual connection
-        # x_spatial = self.spatial_norm(x_spatial)
         
         # Reshape back: [B, T*N_patches, D]
         x = rearrange(x_spatial, '(b t) n d -> b (t n) d', b=B, t=num_frames)
@@ -262,7 +317,6 @@ class SpaceTimeBlock(nn.Module):
         x_temporal = self.temporal_norm(x_temporal)
         x_temporal_attn, _ = self.temporal_attn(x_temporal, x_temporal, x_temporal)
         x_temporal = x_temporal_attn + x_temporal # residual connection
-        # x_temporal = self.temporal_norm(x_temporal)
         
         # Reshape back: [B, T*N_patches, D]
         x = rearrange(x_temporal, '(b n) t d -> b (t n) d', b=B, n=num_patches)
@@ -271,11 +325,44 @@ class SpaceTimeBlock(nn.Module):
         x = self.mlp_norm(x)
         x_mlp = self.mlp(x)
         x = x_mlp + x # residual connection
-        # x = self.mlp_norm(x)
         
         return x
 
-class TemporalBlock(nn.Module):
+class ImuTemporalBlock(nn.Module):
+    """Temporal attention for IMU tokens"""
+    def __init__(self, embed_dim, num_heads, dropout=0.):
+        super().__init__()
+        
+        self.temporal_attn = nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=dropout, batch_first=True
+        )
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+        
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim * 4, embed_dim),
+            nn.Dropout(dropout)
+        )
+    def forward(self, x):
+        """
+        x: [B, T_imu, D]
+        """
+        # Temporal self-attention
+        x = self.norm1(x)
+        x_out, _ = self.temporal_attn(x, x, x)
+        x = x + x_out
+        
+        # MLP
+        x = self.norm2(x)
+        x_mlp = self.mlp(x)
+        x = x + x_mlp
+        
+        return x
+    
+class YawHistTemporalBlock(nn.Module):
     """Temporal attention for IMU tokens"""
     def __init__(self, embed_dim, num_heads, dropout=0.):
         super().__init__()
@@ -296,19 +383,17 @@ class TemporalBlock(nn.Module):
         
     def forward(self, x):
         """
-        x: [B, T_imu, D]
+        x: [B, T, D]
         """
         # Temporal self-attention
         x = self.norm1(x)
         x_out, _ = self.temporal_attn(x, x, x)
         x = x + x_out
-        # x = self.norm1(x)
         
         # MLP
         x = self.norm2(x)
         x_mlp = self.mlp(x)
         x = x + x_mlp
-        # x = self.norm2(x)
         
         return x
     
@@ -317,49 +402,106 @@ class CrossModalAttention(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout=0.):
         super().__init__()
         
-        self.visual_to_imu_attn = nn.MultiheadAttention(
+        # Cross Attention
+        self.visual_to_all_attn = nn.MultiheadAttention(
             embed_dim, num_heads, dropout=dropout, batch_first=True
         )
-        self.imu_to_visual_attn = nn.MultiheadAttention(
+        self.imu_to_all_attn = nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=dropout, batch_first=True
+        )
+        self.yaw_hist_to_all_attn = nn.MultiheadAttention(
             embed_dim, num_heads, dropout=dropout, batch_first=True
         )
         
-        self.visual_norm = nn.LayerNorm(embed_dim)
-        self.imu_norm = nn.LayerNorm(embed_dim)
+        # Feedforward
+        self.visual_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim * 4, embed_dim),
+            nn.Dropout(dropout)
+        )
+        self.imu_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim * 4, embed_dim),
+            nn.Dropout(dropout)
+        )
+        self.yaw_hist_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim * 4, embed_dim),
+            nn.Dropout(dropout)
+        )
         
-    def forward(self, visual_tokens, imu_tokens):
+        self.visual_norm1 = nn.LayerNorm(embed_dim)
+        self.visual_norm2 = nn.LayerNorm(embed_dim)
+        
+        self.imu_norm1 = nn.LayerNorm(embed_dim)
+        self.imu_norm2 = nn.LayerNorm(embed_dim)
+        
+        self.yaw_hist_norm1 = nn.LayerNorm(embed_dim)
+        self.yaw_hist_norm2 = nn.LayerNorm(embed_dim)
+        
+    def forward(self, visual_tokens, imu_tokens, yaw_hist_tokens):
         """Forward block for cross attention
 
         Args:
             visual_tokens (torch.tensor): Tokens from images [B, T*N_patches, D]
             imu_tokens (torch.tensor): Tokens from IMU [B, T, D]
+            yaw_hist_tokens (torch.tensor): Tokens from yaw history [B, T, D]
         Returns:
             fused_tokens (torch.tensor): Fused tokens via cross attention [B, combined_seq_len, D]
         """
         
         # === CROSS-MODAL ATTENTION ===
+        # Concatenate modalities for key-value pairs
+        imu_yaw_tokens = torch.cat([imu_tokens, yaw_hist_tokens], dim=1)
+        visual_yaw_tokens = torch.cat([visual_tokens, yaw_hist_tokens], dim=1)
+        visual_imu_tokens = torch.cat([visual_tokens, imu_tokens], dim=1)
         
-        # Visual attending to IMU (what IMU info is relevant for visual features)
-        visual_tokens = self.visual_norm(visual_tokens)
-        visual_attended, _ = self.visual_to_imu_attn(
+        # Visual attending to IMU and Yaw tokens
+        visual_tokens = self.visual_norm1(visual_tokens)
+        visual_attended, _ = self.visual_to_all_attn(
             query=visual_tokens,
-            key=imu_tokens,
-            value=imu_tokens
+            key=imu_yaw_tokens,
+            value=imu_yaw_tokens
         )
         visual_tokens = visual_tokens + visual_attended
-        # visual_tokens = self.visual_norm(visual_tokens)
+        # Visual feedforward
+        visual_tokens = self.visual_norm2(visual_tokens)
+        visual_tokens_mlp = self.visual_mlp(visual_tokens)
+        visual_tokens = visual_tokens + visual_tokens_mlp
         
-        # IMU attending to visual (what visual info is relevant for IMU features)
-        imu_tokens = self.imu_norm(imu_tokens)
-        imu_attended, _ = self.imu_to_visual_attn(
+        # IMU attending to visual and yaw
+        imu_tokens = self.imu_norm1(imu_tokens)
+        imu_attended, _ = self.imu_to_all_attn(
             query=imu_tokens,
-            key=visual_tokens,
-            value=visual_tokens
+            key=visual_yaw_tokens,
+            value=visual_yaw_tokens
         )
         imu_tokens = imu_tokens + imu_attended
-        # imu_tokens = self.imu_norm(imu_tokens)
+        # IMU feedforward
+        imu_tokens = self.imu_norm2(imu_tokens)
+        imu_tokens_mlp = self.imu_mlp(imu_tokens)
+        imu_tokens = imu_tokens + imu_tokens_mlp
         
-        return visual_tokens, imu_tokens
+        # Yaw attending to visual and IMU
+        yaw_hist_tokens = self.yaw_hist_norm1(yaw_hist_tokens)
+        yaw_hist_attended, _ = self.yaw_hist_to_all_attn(
+            query=yaw_hist_tokens,
+            key=visual_imu_tokens,
+            value=visual_imu_tokens
+        )
+        yaw_hist_tokens = yaw_hist_tokens + yaw_hist_attended
+        # Yaw hist feedforward
+        yaw_hist_tokens = self.yaw_hist_norm2(yaw_hist_tokens)
+        yaw_hist_mlp = self.yaw_hist_mlp(yaw_hist_tokens)
+        yaw_hist_tokens = yaw_hist_tokens + yaw_hist_mlp
+        
+        return visual_tokens, imu_tokens, yaw_hist_tokens
         
 class FusionStrategy(nn.Module):
     # === FUSION STRATEGY ===
@@ -369,19 +511,20 @@ class FusionStrategy(nn.Module):
             
             # Fusion Layer
             self.fusion_mlp = nn.Sequential(
-                nn.Linear(embed_dim * 2, embed_dim),
+                nn.Linear(embed_dim * 3, embed_dim),
                 nn.GELU(),
                 nn.Dropout(dropout),
                 nn.Linear(embed_dim, embed_dim)
             )
             
-        def forward(self, visual_tokens,  imu_tokens):
+        def forward(self, visual_tokens,  imu_tokens, yaw_hist_tokens):
             # Globally pool visual and imu tokens along the sequence dimension
             visual_pooled = visual_tokens.mean(dim=1)
             imu_pooled = imu_tokens.mean(dim=1)
+            yaw_hist_pooled = yaw_hist_tokens.mean(dim=1)
             
             # Concatenate pooled tokens along the embedding dimesion
-            combined_tokens = torch.cat([visual_pooled, imu_pooled], dim=1)
+            combined_tokens = torch.cat([visual_pooled, imu_pooled, yaw_hist_pooled], dim=1)
             
             # Fuse combined tokens in MLP
             fused_tokens = self.fusion_mlp(combined_tokens) # [B, D]
