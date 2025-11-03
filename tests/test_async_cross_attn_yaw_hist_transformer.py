@@ -35,8 +35,8 @@ WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 # === DATALOADER PARAMETERS ===
 NUM_FRAMES = 2
 IMG_SIZE = (224,448)
-BATCH_SIZE = 6
-NUM_WORKERS = 4
+BATCH_SIZE = 1
+NUM_WORKERS = 0
 
 # === MODEL PARAMETERS ===
 NUM_FRAMES = 2
@@ -87,7 +87,7 @@ def test():
     # Load weights
     state_dict = torch.load(WEIGHT_PATH)
     model.load_state_dict(state_dict)
-    
+
     # evalulate single model
     est_array = []
     truth_array = []
@@ -99,19 +99,27 @@ def test():
             x[0] = x[0].to(device=device, dtype=torch.float32) # images
             x[1] = x[1].to(device=device, dtype=torch.float32) # IMU
             x[2] = x[2].to(device=device, dtype=torch.float32) # yaw history
-            
+
             y = y.to(device=device, dtype=torch.float32)
 
             # initialize yaw estimates with truth
-            if t != 0: # After first pass, start using estimates as history yaw input. Assumes first 5 are free
-                pass
-                    
+            # if t == 0:
+            #     yaw_hist = x[2] # initialize the yaw history from external sources (from dataloader)
+            # else: # After first pass, start using estimates as history yaw input
+            #     x[2] = yaw_hist
+        
             trans_est, rot_est, yaw_est = model(x)
+
+            # update yaw hist with latest prediction and popping earlies entry
+            # yaw_hist_list = yaw_hist.tolist()
+            # yaw_hist_list[0].append(yaw_est.squeeze().cpu()) # appends latest estimate
+            # yaw_hist_list[0].pop(0) # pops earliest entry
+            # yaw_hist = torch.tensor(yaw_hist_list).to(device=device, dtype=torch.float32) # convert back to tensor
             
             est = torch.cat((trans_est, rot_est, yaw_est), dim=1)
             est_array.append(est)
             truth_array.append(y)
-            
+
             # print(f"Percent Complete: {(t*BATCH_SIZE/L)*100}")
             # print(f"Single loop time: {time.time()-start_time}")
             stop=1
@@ -214,7 +222,7 @@ if __name__ == "__main__":
     plt.ylabel("Y")
     plt.legend(["Est from dyaw", "Est from pred", "Truth"])
     plt.show()
-    
+
     error = compute_abs_pos_error((df["X"],df["Y"]), (X_est_array, Y_est_array))
     error2 = compute_abs_pos_error((df["X"],df["Y"]), (X_est_array2, Y_est_array2))
     plt.plot(error)
@@ -222,7 +230,7 @@ if __name__ == "__main__":
     plt.legend(['From dyaw', 'From pred'])
     plt.ylabel("Position Error")
     plt.show()
-    
+
     plt.subplot(211)
     plt.plot(X_est_array - df["X"])
     plt.ylabel("Easting Error")
@@ -230,14 +238,14 @@ if __name__ == "__main__":
     plt.plot(Y_est_array - df["Y"])
     plt.ylabel("Northing Error")
     plt.show()
-    
+
     plt.plot(df["yaw"], '--')
     plt.plot(yaw_est_array)
     plt.plot(yaw_est_from_pred)
     plt.ylabel("Yaw prediction")
     plt.legend(["Truth", "Est from disp", "Est from pred"])
     plt.show()
-    
+
     plt.subplot(511)
     plt.plot(dx_body_truth)
     plt.plot(dx_body)
@@ -261,7 +269,7 @@ if __name__ == "__main__":
     plt.xlabel('cos yaw')
     plt.tight_layout()
     plt.show()
-    
+
     plt.subplot(511)
     plt.plot(dx_body_truth - dx_body)
     plt.title('Prediction Errors')
