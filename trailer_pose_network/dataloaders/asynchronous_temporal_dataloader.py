@@ -117,6 +117,7 @@ class AsyncTemporalDataLoader(Dataset):
                             concat_images = list(executor.map(self.transform_img,concat_images))
 
             input_cam = torch.stack(concat_images)
+            # input_cam = torch.randn(2,3,224,448)
             # for image in concat_images:
             #     image = concat_images[0].permute(1,2,0).numpy()
             #     cv2.imshow("test", image)
@@ -128,12 +129,17 @@ class AsyncTemporalDataLoader(Dataset):
         # Load CAN and IMU from seq_block_raw
         if self.inputs["can"]:
             input_can = torch.stack([torch.tensor(seq_block_raw["steer_ang"].to_list()),torch.tensor(seq_block_raw["vx"].to_list())]).permute(1,0)
+            # input_can = torch.randn(5,2)
         if self.inputs["imu"]:
             input_imu = torch.stack([torch.tensor(seq_block_raw["imu_accel_x"].to_list()),torch.tensor(seq_block_raw["imu_accel_y"].to_list()),torch.tensor(seq_block_raw["imu_accel_z"].to_list()),
             torch.tensor(seq_block_raw["imu_gyro_x"].to_list()),torch.tensor(seq_block_raw["imu_gyro_y"].to_list()),torch.tensor(seq_block_raw["imu_gyro_z"].to_list())]).permute(1,0)
+        # input_imu = torch.randn(5,6)
         if self.inputs["yaw_hist"]:
-            input_yaw_hist = torch.tensor(seq_block_raw["yaw"].iloc[:-1].to_list()).unsqueeze(1)
-            input_yaw_hist = torch.cat([torch.sin(input_yaw_hist), torch.cos(input_yaw_hist)], dim=1) # use sin and cos of yaw for observability
+            yaw_hist = torch.tensor([seq_block_raw["yaw"].iloc[0]]).unsqueeze(1)
+            # inject artifical noise so we don't train on pure truth
+            # TODO: Make this option configurable (differs from testing and training)
+            # noisy_yaw_hist = self.inject_noise_to_yaw_hist(yaw_hist, [0.00876, 0.0349], 0.8) # std is approx between [0.5 and 2] deg
+            input_yaw_hist = torch.cat([torch.sin(yaw_hist), torch.cos(yaw_hist)], dim=1) # use sin and cos of yaw for observability
         
         
         # generate list of inputs
@@ -223,7 +229,10 @@ class AsyncTemporalDataLoader(Dataset):
             yaw = seq_block["yaw"].iloc[-1] # most current yaw to predict
             sin_yaw = np.sin(yaw) 
             cos_yaw = np.cos(yaw)
-            outputs = [dx_body, dy_body, dyaw, sin_yaw, cos_yaw]
+            # outputs = [dx_body, dy_body, dyaw, sin_yaw, cos_yaw]
+            sin_dyaw = np.sin(dyaw)
+            cos_dyaw = np.cos(dyaw)
+            outputs = [sin_dyaw, cos_dyaw]
             outputs = torch.as_tensor(outputs)
             
             return outputs
@@ -368,3 +377,24 @@ class AsyncTemporalDataLoader(Dataset):
                     result_df = result_df.sample(target_size, random_state=random_state + 1000)
             
             return result_df.reset_index(drop=True)
+    
+    def inject_noise_to_yaw_hist(self, yaw_hist, noise_std_range, corruption_prob):
+        """
+        Injects noise to yaw history inputs. Helps avoid using pure truth to train model.
+
+        Args:
+            yaw_hist (torch.tensor): yaw history array.
+            noise_std (list): The STD range of the noise in rads.
+            corruption_prob (float): A float value between 0.0 and 1.0 indicating the probability to inject noise.
+                                     This allows to some clean data to get through at times.
+        return
+            (torch.tensor): Noisy yaw history.
+        """
+        # chance to return clean data
+        if np.random.random() > corruption_prob:
+            return yaw_hist 
+        # generate random std for batch
+        noise_std = np.random.uniform(noise_std_range[0], noise_std_range[1])
+        # generate noise profile
+        noise = torch.randn_like(yaw_hist) * noise_std
+        return yaw_hist + noise

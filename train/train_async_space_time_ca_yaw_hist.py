@@ -11,7 +11,6 @@ from torchvision import transforms
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader, random_split
 import pytorch_warmup as warmup
-
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
 from trailer_pose_network.models.spacetime.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
 from trailer_pose_network.models.spacetime.async_space_time_ca_yaw_hist import AsyncSpaceTimeYawHist
@@ -28,11 +27,11 @@ SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
 # SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
 
 WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_yaw_hist"
-WEIGHT_FILE = "async_space_time_yaw_hist_v1.pth"
+WEIGHT_FILE = "async_space_time_yaw_hist_v5.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
 
-PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
+PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_yaw_hist\\async_space_time_yaw_hist_v4.pth"
 PRETRAINED = False
 
 # === DATALOADER PARAMETERS ===
@@ -59,8 +58,6 @@ NUM_EPOCHS = 15
 LR = 3e-5
 LOSS_SCALE = [1e0, 3e2, 1e0]
 LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
-# LOSS_SCALE = 1e1
-# LOSS_FUNC = nn.L1Loss()
 BETAS = (0.9, 0.999)
 WEIGHT_DECAY = 0.05
 WARMUP_PERIOD = 2 # The number of epochs to warmup
@@ -76,7 +73,7 @@ def train():
                                         sequence_root_raw=SEQ_ROOT_RAW,
                                         sequential_lookback=NUM_FRAMES,
                                         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':True},
-                                        reduce={'target_column':'steer_ang', 'target_size':5000},
+                                        reduce={'target_column':'yaw', 'target_size':5000},
                                         transform_img=v2.Compose([
                                             v2.ToPILImage(),
                                             v2.Resize(IMG_SIZE),
@@ -92,17 +89,18 @@ def train():
     loader_val = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
     
     # Load model
-    model = AsyncSpaceTimeYawHist(IMG_SIZE,
-                                         PATCH_SIZE,
-                                         IN_CHANNELS,
-                                         EMBED_DIM,
-                                         NUM_FRAMES,
-                                         NUM_IMU_SAMPLES,
-                                         IMU_CHANNELS,
-                                         NUM_HEADS,
-                                         DEPTH,
-                                         DROPOUT,
-                                         NUM_OUTPUTS)
+    model = AsyncSpaceTimeYawHist(
+        IMG_SIZE,
+        PATCH_SIZE,
+        IN_CHANNELS,
+        EMBED_DIM,
+        NUM_FRAMES,
+        NUM_IMU_SAMPLES,
+        IMU_CHANNELS,
+        NUM_HEADS,
+        DEPTH,
+        DROPOUT,
+        NUM_OUTPUTS)
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Device is Use: %s' % device)
     model = model.to(device)

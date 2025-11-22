@@ -23,20 +23,20 @@ from trailer_pose_network.trainers.trainer_async_space_time_ca_yaw_hist import T
 # Set Global variables
 
 # === FILE LOADING ===
-SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\04\\"
-SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\04\\"            
+SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02\\"
+SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02\\"            
 # SEQ_ROOT_PROCESSED = "D:\\TrainingData\\simulation\\10Hz\\INT\\INT1\\"
 # SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\INT\\INT1\\"
 
 WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_yaw_hist"
-WEIGHT_FILE = "async_space_time_yaw_hist_v1.pth"
+WEIGHT_FILE = "async_space_time_yaw_hist_v3.pth"
 WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 # === DATALOADER PARAMETERS ===
 NUM_FRAMES = 2
 IMG_SIZE = (224,448)
-BATCH_SIZE = 1
-NUM_WORKERS = 0
+BATCH_SIZE = 6
+NUM_WORKERS = 4
 
 # === MODEL PARAMETERS ===
 NUM_FRAMES = 2
@@ -109,7 +109,7 @@ def test():
             #     x[2] = yaw_hist
         
             trans_est, rot_est, yaw_est = model(x)
-
+            
             # update yaw hist with latest prediction and popping earlies entry
             # yaw_hist_list = yaw_hist.tolist()
             # yaw_hist_list[0].append(yaw_est.squeeze().cpu()) # appends latest estimate
@@ -194,7 +194,8 @@ if __name__ == "__main__":
     Y_est_array2.insert(0,df.iloc[0]["Y"])
     yaw_est_array.insert(0,df.iloc[0]["yaw"])
     
-    yaw_est_from_pred = np.unwrap(np.arctan2(sinyaw, cosyaw)).tolist()
+    yaw_est_from_pred = np.arctan2(sinyaw, cosyaw)
+    yaw_est_from_pred = np.unwrap((yaw_est_from_pred + 2 * np.pi) % (2 * np.pi))
     # yaw_est_from_pred.insert(0,df.iloc[0]["yaw"])
     
     for i in range(1,len(df)):
@@ -233,15 +234,17 @@ if __name__ == "__main__":
 
     plt.subplot(211)
     plt.plot(X_est_array - df["X"])
+    plt.plot(X_est_array2 - df["X"])
     plt.ylabel("Easting Error")
     plt.subplot(212)
     plt.plot(Y_est_array - df["Y"])
+    plt.plot(Y_est_array2 - df["Y"])
     plt.ylabel("Northing Error")
     plt.show()
 
-    plt.plot(df["yaw"], '--')
-    plt.plot(yaw_est_array)
-    plt.plot(yaw_est_from_pred)
+    plt.plot(np.rad2deg(df["yaw"]), '--')
+    plt.plot(np.rad2deg(yaw_est_array))
+    plt.plot(np.rad2deg(yaw_est_from_pred))
     plt.ylabel("Yaw prediction")
     plt.legend(["Truth", "Est from disp", "Est from pred"])
     plt.show()

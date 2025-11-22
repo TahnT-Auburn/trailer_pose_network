@@ -28,7 +28,7 @@ class AsyncSpaceTimeYawHist(nn.Module):
         self.embed_dim = embed_dim
         self.num_patches = (img_size[0]*img_size[1]) // patch_size ** 2
         self.dropout = nn.Dropout(dropout)
-        self.num_yaw_hist_samples = num_imu_samples - 1 # Assuming we omit the final (current) yaw
+        self.num_yaw_hist_samples = 1 # Assuming we omit the final (current) yaw
         
         # === IMAGE EMBEDDING ===
         # Patch embedding for spatial tokenization
@@ -57,10 +57,10 @@ class AsyncSpaceTimeYawHist(nn.Module):
         # === YAW HISTORY EMBEDDING ===
         self.yaw_hist_embed = nn.Linear(2, embed_dim)
         
-        # temporal positional embedding for yaw histories
-        self.yaw_hist_temporal_pos_embedding = nn.Parameter(
-            torch.randn(1, self.num_yaw_hist_samples, embed_dim) * 0.02
-        )
+        # temporal positional embedding for yaw histories # UNDER CONSTRUCTION
+        # self.yaw_hist_temporal_pos_embedding = nn.Parameter(
+        #     torch.randn(1, self.num_yaw_hist_samples, embed_dim) * 0.02
+        # )
         
         # === MODALITY TOKENS ===
         self.visual_mod_token = nn.Parameter(
@@ -98,7 +98,9 @@ class AsyncSpaceTimeYawHist(nn.Module):
         ])
         
         # === FUSION STRATEGY ===
-        self.fusion_strat = FusionStrategy(embed_dim, dropout)
+        # self.fusion_strat = GlobalPoolFusionStrategy(embed_dim, dropout)
+        self.fusion_strat = TaskSpecificFusionStrategy(embed_dim, num_heads, dropout)
+        # self.fusion_strat = LightweightTaskFusion(embed_dim, dropout)
         
         # === NETWORK HEADS === 
         self.final_norm_trans = nn.LayerNorm(embed_dim)
@@ -203,7 +205,7 @@ class AsyncSpaceTimeYawHist(nn.Module):
         yaw_hist_tokens = self.yaw_hist_embed(yaw_histories)
         
         # Add temporal positional embedding
-        yaw_hist_tokens = yaw_hist_tokens + self.yaw_hist_temporal_pos_embedding
+        # yaw_hist_tokens = yaw_hist_tokens + self.yaw_hist_temporal_pos_embedding
         
         # Add modality embedding
         yaw_hist_tokens = yaw_hist_tokens + self.yaw_hist_mod_token.expand(B, -1, -1)
@@ -240,21 +242,22 @@ class AsyncSpaceTimeYawHist(nn.Module):
         for block in self.imu_blocks:
             imu_tokens = block(imu_tokens)
         
-        # === YAW HIST TIME ATTENTION ENCODER ===
-        for block in self.yaw_hist_blocks:
-            yaw_hist_tokens = block(yaw_hist_tokens)
+        # === YAW HIST TIME ATTENTION ENCODER === # UNDER CONSTRUCTION. TRYING A SINGLE HISTORY AND EMBEDDING ONLY
+        # for block in self.yaw_hist_blocks:
+        #     yaw_hist_tokens = block(yaw_hist_tokens) 
         
         # === CROSS-MODAL FUSION ===
         for cross_block in self.cross_modal_blocks:
             visual_tokens, imu_tokens, yaw_hist_tokens = cross_block(visual_tokens, imu_tokens, yaw_hist_tokens)
             
         # === FUSION OF VISUAL AND IMU TOKENS ===
-        fused_tokens = self.fusion_strat(visual_tokens, imu_tokens, yaw_hist_tokens)
+        # fused_tokens = self.fusion_strat(visual_tokens, imu_tokens, yaw_hist_tokens)
+        trans_feat, rot_feat, yaw_feat = self.fusion_strat(visual_tokens, imu_tokens, yaw_hist_tokens)
         
         # === FINAL NETWORK HEAD FOR PREDICTION ===
-        trans_predictions = self.network_head_trans(self.final_norm_trans(fused_tokens))
-        rot_predictions = self.network_head_rot(self.final_norm_rot(fused_tokens))
-        yaw_predictions = self.network_head_yaw(self.final_norm_yaw(fused_tokens))
+        trans_predictions = self.network_head_trans(self.final_norm_trans(trans_feat))
+        rot_predictions = self.network_head_rot(self.final_norm_rot(rot_feat))
+        yaw_predictions = self.network_head_yaw(self.final_norm_yaw(yaw_feat))
         # predictions =  torch.cat((trans_predictions, rot_predictions), dim=1)
         
         return trans_predictions, rot_predictions, yaw_predictions
@@ -503,7 +506,7 @@ class CrossModalAttention(nn.Module):
         
         return visual_tokens, imu_tokens, yaw_hist_tokens
         
-class FusionStrategy(nn.Module):
+class GlobalPoolFusionStrategy(nn.Module):
     # === FUSION STRATEGY ===
     # Current strategy is to globally pool visual and imu tokens along the sequence dimension and concatenate along the embedding dimension
         def __init__(self, embed_dim, dropout):
@@ -530,3 +533,139 @@ class FusionStrategy(nn.Module):
             fused_tokens = self.fusion_mlp(combined_tokens) # [B, D]
             
             return fused_tokens
+        
+class TaskSpecificFusionStrategy(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout):
+        super().__init__()
+        
+        # learnable queries for each task
+        # self.task_queries = nn.Parameter(torch.randn(3,1, embed_dim))
+        self.translation_query = nn.Parameter(torch.randn(1, 1, embed_dim))
+        self.rotation_query = nn.Parameter(torch.randn(1, 1, embed_dim))
+        self.abs_yaw_query = nn.Parameter(torch.randn(1, 1, embed_dim))
+        
+        # Cross-attention for pooling
+        self.attention = nn.MultiheadAttention(
+            embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # small refinement mlps per task
+        self.task_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim // 2, embed_dim)
+        )
+        self.translation_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim // 2, embed_dim) 
+        )
+        # small refinement mlps per task
+        self.rotation_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim // 2, embed_dim)
+        )
+        # small refinement mlps per task
+        self.abs_yaw_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim // 2, embed_dim)
+        )
+
+    def forward(self, visual_tokens,  imu_tokens, yaw_hist_tokens):
+        B = visual_tokens.shape[0]
+        
+        # concatenate all tokens
+        all_tokens = torch.cat([visual_tokens, imu_tokens, yaw_hist_tokens], dim=1)
+        # generate features for each task
+        # queries = self.task_queries.expand(-1, B, -1).transpose(0, 1) # [B, 3, D]
+        
+        # task_features, _ = self.attention(
+        #     queries,
+        #     all_tokens,
+        #     all_tokens
+        # )
+        # task_features = self.task_mlp(task_features)
+        # trans_feat = task_features[:,0]
+        # rot_feat = task_features[:,1]
+        # yaw_feat = task_features[:,2]
+        # translation
+        trans_feat, trans_attn = self.attention(
+            self.translation_query.expand(B, -1, -1),
+            all_tokens,
+            all_tokens
+        )
+        trans_feat = trans_feat.squeeze(1)
+        trans_feat = self.translation_mlp(trans_feat)
+        # rotation
+        rot_feat, rot_attn = self.attention(
+            self.rotation_query.expand(B, -1, -1),
+            all_tokens,
+            all_tokens
+        )
+        rot_feat = rot_feat.squeeze(1)
+        rot_feat = self.rotation_mlp(rot_feat)
+        # abs yaw
+        yaw_feat, yaw_attn = self.attention(
+            self.abs_yaw_query.expand(B, -1, -1),
+            all_tokens,
+            all_tokens
+        )
+        yaw_feat = yaw_feat.squeeze(1)
+        yaw_feat = self.abs_yaw_mlp(yaw_feat)
+        
+        return trans_feat, rot_feat, yaw_feat
+    
+    
+class LightweightTaskFusion(nn.Module):
+    def __init__(self, embed_dim, dropout=0.1):
+        super().__init__()
+        
+        # Task-specific attention weights (just linear layers)
+        self.xy_attention = nn.Linear(embed_dim, 1)
+        self.abs_yaw_attention = nn.Linear(embed_dim, 1)
+        self.delta_yaw_attention = nn.Linear(embed_dim, 1)
+        
+        self.dropout = nn.Dropout(dropout)
+        
+    def compute_task_feature(self, all_tokens, attention_layer):
+        """
+        Args:
+            all_tokens: [B, N, D]
+            attention_layer: Linear(D, 1)
+        Returns:
+            feature: [B, D]
+        """
+        # Compute attention weights
+        attn_logits = attention_layer(all_tokens)  # [B, N, 1]
+        attn_weights = F.softmax(attn_logits, dim=1)  # [B, N, 1]
+        
+        # Weighted sum
+        feature = (all_tokens * attn_weights).sum(dim=1)  # [B, D]
+        
+        return feature, attn_weights
+        
+    def forward(self, visual_tokens, imu_tokens, yaw_tokens):
+        """
+        Args:
+            visual_tokens: [B, N_v, D]
+            imu_tokens: [B, N_i, D]
+            yaw_tokens: [B, N_y, D]
+        """
+        # Concatenate once
+        all_tokens = torch.cat([visual_tokens, imu_tokens, yaw_tokens], dim=1)
+        
+        # Compute task-specific features in parallel
+        xy_feat, xy_attn = self.compute_task_feature(all_tokens, self.xy_attention)
+        abs_yaw_feat, abs_yaw_attn = self.compute_task_feature(all_tokens, self.abs_yaw_attention)
+        delta_yaw_feat, delta_yaw_attn = self.compute_task_feature(all_tokens, self.delta_yaw_attention)
+        
+        return xy_feat, delta_yaw_feat, abs_yaw_feat

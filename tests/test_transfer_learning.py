@@ -31,7 +31,7 @@ TRAIN_SPECS = 'C:\\Users\\pzt0029\\Documents\\Networks\\trailer_pose_network\\sp
 # Set up modified network
 # 'IMAGENET1K_V1'
 model = torchvision.models.mobilenet_v2(weights='IMAGENET1K_V1')
-# model = torchvision.models.resnet34(weights=None)
+model = torchvision.models.resnet34(weights=None)
 
 # torchvision.models.resnet18
 output_states = 2
