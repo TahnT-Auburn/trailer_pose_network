@@ -30,7 +30,7 @@ WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 # === DATALOADER PARAMETERS ===
 NUM_FRAMES = 2
 IMG_SIZE = (224,448)
-BATCH_SIZE = 6
+BATCH_SIZE = 1
 NUM_WORKERS = 4
 
 # === MODEL PARAMETERS ===
@@ -99,15 +99,15 @@ def test():
             y = y.to(device=device, dtype=torch.float32)
 
             # initialize yaw estimates with truth
-            # if t == 0:
-            #     yaw_hist = x[2] # initialize the yaw history from external sources (from dataloader)
-            # else: # After first pass, start using estimates as history yaw input
-            #     x[2] = yaw_hist # replace with model last estimate
+            if t == 0:
+                yaw_hist = x[2] # initialize the yaw history from external sources (from dataloader)
+            else: # After first pass, start using estimates as history yaw input
+                x[2] = yaw_hist # replace with model last estimate
         
             trans_est, rot_est, yaw_est = model(x)
             
             # update yaw hist with latest prediction
-            # yaw_hist = yaw_est.unsqueeze(1)
+            yaw_hist = yaw_est.unsqueeze(1)
             
             est = torch.cat((trans_est, rot_est, yaw_est), dim=1)
             est_array.append(est)

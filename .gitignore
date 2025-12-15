@@ -4,3 +4,4 @@ data/
 weights/
 spreadsheets/
 *.png
+__pycache__

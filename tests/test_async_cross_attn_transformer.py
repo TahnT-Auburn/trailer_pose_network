@@ -215,23 +215,42 @@ if __name__ == "__main__":
     plt.show()
     
     plt.subplot(311)
+    plt.title('Odom Predictions')
     plt.plot(dx_body_truth)
     plt.plot(dx_body)
+    plt.ylabel('dx (m)')
     plt.legend(['Truth', 'Pred'])
     plt.subplot(312)
     plt.plot(dy_body_truth)
     plt.plot(dy_body)
+    plt.ylabel('dy (m)')
     plt.subplot(313)
     plt.plot(np.rad2deg(dyaw_truth))
     plt.plot(np.rad2deg(dyaw))
+    plt.ylabel('dyaw (deg)')
     plt.tight_layout()
     plt.show()
     
     plt.subplot(311)
+    plt.title('Odom Error')
     plt.plot(dx_body_truth - dx_body)
+    plt.ylabel('dx (m)')
     plt.subplot(312)
     plt.plot(dy_body_truth - dy_body)
+    plt.ylabel('dy (m)')
     plt.subplot(313)
     plt.plot(np.rad2deg(dyaw_truth - dyaw))
+    plt.ylabel('dyaw (deg)')
     plt.tight_layout()
     plt.show()
+    
+    #%%
+    # write output to csv for test (DELETE LATER)
+    output_file = "model_odom_outputs.csv"
+    data = {
+        'dx_body': dx_body,
+        'dy_body': dy_body,
+        'dyaw': dyaw
+    }
+    df = pd.DataFrame(data)
+    df.to_csv(output_file, index=False)

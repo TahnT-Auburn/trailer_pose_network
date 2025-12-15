@@ -104,8 +104,10 @@ class AsyncTemporalDataLoader(Dataset):
             # start_time = time.time()
             left_images = []
             right_images =[]
-            left_paths = seq_block["LRMC"].to_list()
-            right_paths = seq_block["RRMC"].to_list()
+            left_paths = [seq_block["LRMC"].iloc[0], seq_block["LRMC"].iloc[5], seq_block["LRMC"].iloc[-1]] # NOTE: grabs first, middle, and last images ONLY!
+            right_paths = [seq_block["RRMC"].iloc[0], seq_block["RRMC"].iloc[5], seq_block["RRMC"].iloc[-1]]
+            # left_paths = seq_block["LRMC"].to_list()
+            # right_paths = seq_block["RRMC"].to_list()
             with ThreadPoolExecutor(max_workers=32) as executor:
                     left_images = list(executor.map(self.load_image,left_paths))
                     right_images = list(executor.map(self.load_image,right_paths))
@@ -226,13 +228,28 @@ class AsyncTemporalDataLoader(Dataset):
             pose1 = (seq_block["X"].iloc[0], seq_block["Y"].iloc[0], seq_block["yaw"].iloc[0])
             pose2 = (seq_block["X"].iloc[-1], seq_block["Y"].iloc[-1], seq_block["yaw"].iloc[-1])
             dx_body, dy_body, dyaw = self.tangent_to_body_frame_translation(pose1, pose2)
-            yaw = seq_block["yaw"].iloc[-1] # most current yaw to predict
-            sin_yaw = np.sin(yaw) 
-            cos_yaw = np.cos(yaw)
-            # outputs = [dx_body, dy_body, dyaw, sin_yaw, cos_yaw]
-            sin_dyaw = np.sin(dyaw)
-            cos_dyaw = np.cos(dyaw)
-            outputs = [sin_dyaw, cos_dyaw]
+            # yaw = seq_block["yaw"].iloc[-1] # most current yaw to predict
+            # sin_yaw = np.sin(yaw) 
+            # cos_yaw = np.cos(yaw)
+            # sin_dyaw = np.sin(dyaw)
+            # # cos_dyaw = np.cos(dyaw)
+            # # outputs = [sin_dyaw, cos_dyaw]
+            
+            # get 0.1s intervals (10Hz deltas)
+            dx_body_ = []
+            dy_body_ = []
+            dyaw_ = []
+            seq_block_10hz = seq_block.iloc[::4].reset_index(drop=True) # take every 4th step since time is perfect
+            for i in range(1, len(seq_block_10hz)):
+                pose1 = (seq_block_10hz["X"].iloc[i-1], seq_block_10hz["Y"].iloc[i-1], seq_block_10hz["yaw"].iloc[i-1])
+                pose2 = (seq_block_10hz["X"].iloc[i], seq_block_10hz["Y"].iloc[i], seq_block_10hz["yaw"].iloc[i])
+                dx_body, dy_body, dyaw = self.tangent_to_body_frame_translation(pose1, pose2)
+                dx_body_.append(dx_body)
+                dy_body_.append(dy_body)
+                dyaw_.append(dyaw)
+            outputs = [dx_body_, dy_body_, dyaw_]
+            
+            # outputs = [dx_body, dx_body, dyaw]
             outputs = torch.as_tensor(outputs)
             
             return outputs
@@ -398,3 +415,4 @@ class AsyncTemporalDataLoader(Dataset):
         # generate noise profile
         noise = torch.randn_like(yaw_hist) * noise_std
         return yaw_hist + noise
+    

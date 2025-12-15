@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, random_split
 import pytorch_warmup as warmup
 
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
-from trailer_pose_network.models.spacetime.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
+from trailer_pose_network.models.spacetime.async_st_ca_rn import AsyncSpaceTimeCrossAttentionResNet
 
 from trailer_pose_network.trainer import Trainer
 
@@ -24,10 +24,10 @@ from trailer_pose_network.trainer import Trainer
 SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
 SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time"
-WEIGHT_FILE = "async_space_time_cross_attn_v3.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn"
+WEIGHT_FILE = "async_st_ca_rn_v1.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
-SAVE_WEIGHTS = None
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
 
 PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
 PRETRAINED = False
@@ -40,7 +40,7 @@ VAL_RATIO = 0.2
 NUM_WORKERS = 4
 
 # === MODEL PARAMETERS ===
-NUM_FRAMES = 2
+NUM_FRAMES = 3
 NUM_IMU_SAMPLES = 41
 EMBED_DIM = 384
 NUM_HEADS = 8
@@ -52,8 +52,8 @@ DROPOUT = 0.
 NUM_OUTPUTS = 3
 
 # === TRAINING PARAMETERS ===
-NUM_EPOCHS = 5
-LR = 3e-5
+NUM_EPOCHS = 60
+LR = 1e-4
 LOSS_SCALE = [1e0, 3e2]
 LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
 # LOSS_SCALE = 1e1
@@ -69,17 +69,23 @@ CHECK_GRADIENTS = False
 #%%
 def train():
     # Load dataset
-    full_set = AsyncTemporalDataLoader(sequence_root_processed=SEQ_ROOT_PROCESSED,
-                                        sequence_root_raw=SEQ_ROOT_RAW,
-                                        sequential_lookback=SEQ_LOOKBACK,
-                                        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-                                        reduce={'target_column':'steer_ang', 'target_size':500},
-                                        transform_img=v2.Compose([
-                                            v2.ToPILImage(),
-                                            v2.Resize(IMG_SIZE),
-                                            v2.ToTensor(),
-                                        ]),
-                                    )
+    full_set = AsyncTemporalDataLoader(
+        sequence_root_processed=SEQ_ROOT_PROCESSED,
+        sequence_root_raw=SEQ_ROOT_RAW,
+        sequential_lookback=SEQ_LOOKBACK,
+        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
+        reduce={'target_column':'steer_ang', 'target_size':10000},
+        transform_img=v2.Compose([
+            v2.ToPILImage(),
+            v2.Resize(IMG_SIZE),
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            ),
+        ]),
+    )
     num_val = int(np.round(VAL_RATIO * len(full_set)))
     num_train = len(full_set) - num_val
     train_set, val_set = random_split(full_set, [num_train, num_val])
@@ -89,17 +95,18 @@ def train():
     loader_val = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
     
     # Load model
-    model = AsyncSpaceTimeCrossAttention(IMG_SIZE,
-                                         PATCH_SIZE,
-                                         IN_CHANNELS,
-                                         EMBED_DIM,
-                                         NUM_FRAMES,
-                                         NUM_IMU_SAMPLES,
-                                         IMU_CHANNELS,
-                                         NUM_HEADS,
-                                         DEPTH,
-                                         DROPOUT,
-                                         NUM_OUTPUTS)
+    model = AsyncSpaceTimeCrossAttentionResNet(
+        img_size=IMG_SIZE,
+        seqential_lookback=SEQ_LOOKBACK,
+        in_channels=IN_CHANNELS,
+        embed_dim=EMBED_DIM,
+        num_frames=NUM_FRAMES,
+        num_imu_samples=NUM_IMU_SAMPLES,
+        imu_channels=IMU_CHANNELS,
+        num_heads=NUM_HEADS,
+        depth=DEPTH,
+        dropout=DROPOUT,
+    )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Device is Use: %s' % device)
     model = model.to(device)
@@ -115,21 +122,23 @@ def train():
     warmup_period = len(loader_train) * WARMUP_PERIOD
     warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
     
-    network_trainer = Trainer(model=model,
-                              optimizer=optimizer,
-                              scheduler=scheduler,
-                              warmup_scheduler=warmup_scheduler,
-                              loader_train=loader_train,
-                              loader_val=loader_val,
-                              run_val=RUN_VAL,
-                              overfit_detector=OVERFIT_DETECTOR,
-                              loss_scale=LOSS_SCALE,
-                              loss_save_interval=None,
-                              device=device,
-                              check_accuracy=CHECK_ACCURACY,
-                              check_gradients=CHECK_GRADIENTS,
-                              verbose=len(loader_train),
-                              save_weights=SAVE_WEIGHTS)
+    network_trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        warmup_scheduler=warmup_scheduler,
+        loader_train=loader_train,
+        loader_val=loader_val,
+        run_val=RUN_VAL,
+        overfit_detector=OVERFIT_DETECTOR,
+        loss_scale=LOSS_SCALE,
+        loss_save_interval=None,
+        device=device,
+        check_accuracy=CHECK_ACCURACY,
+        check_gradients=CHECK_GRADIENTS,
+        verbose=len(loader_train),
+        save_weights=SAVE_WEIGHTS
+    )
     
     # Train model
     print('Training ...')

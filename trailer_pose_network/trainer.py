@@ -441,6 +441,9 @@ def checkAccuracy(est_history, truth_history):
     # convert delta yaw pred to degrees (NOTE: Hacky)
     rmse[2] = np.rad2deg(rmse[2])
 
+    # take mean across temporal dim
+    rmse = np.mean(rmse, axis=1)
+    
     return rmse
     
 

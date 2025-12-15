@@ -38,6 +38,8 @@ NUM_WORKERS = 4
 
 # === MODEL PARAMETERS ===
 EMBED_DIM = 384
+NUM_HEADS = 8
+DROPOUT = 0.
 
 def test():
     test_set = AsyncTemporalDataLoader(
@@ -62,7 +64,9 @@ def test():
     
     # load model and pretrained weights
     model = ResNetBasedVisualOdom(
-        embed_dim=EMBED_DIM
+        embed_dim=EMBED_DIM,
+        num_heads=NUM_HEADS,
+        dropout=DROPOUT
     )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
