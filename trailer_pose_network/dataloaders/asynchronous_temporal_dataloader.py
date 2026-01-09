@@ -101,13 +101,15 @@ class AsyncTemporalDataLoader(Dataset):
         
         # Load images from original seq_block
         if self.inputs["cam"]:
-            # start_time = time.time()
+            start_time = time.time()
             left_images = []
             right_images =[]
-            left_paths = [seq_block["LRMC"].iloc[0], seq_block["LRMC"].iloc[5], seq_block["LRMC"].iloc[-1]] # NOTE: grabs first, middle, and last images ONLY!
-            right_paths = [seq_block["RRMC"].iloc[0], seq_block["RRMC"].iloc[5], seq_block["RRMC"].iloc[-1]]
-            # left_paths = seq_block["LRMC"].to_list()
-            # right_paths = seq_block["RRMC"].to_list()
+            # left_paths = [seq_block["LRMC"].iloc[0], seq_block["LRMC"].iloc[5], seq_block["LRMC"].iloc[-1]] # NOTE: grabs first, middle, and last images ONLY!
+            # right_paths = [seq_block["RRMC"].iloc[0], seq_block["RRMC"].iloc[5], seq_block["RRMC"].iloc[-1]]
+            # left_paths = [seq_block["LRMC"].iloc[0], seq_block["LRMC"].iloc[-1]] # NOTE: grabs first, and last images ONLY!
+            # right_paths = [seq_block["RRMC"].iloc[0], seq_block["RRMC"].iloc[-1]]
+            left_paths = seq_block["LRMC"].to_list() # grabs all images
+            right_paths = seq_block["RRMC"].to_list()
             with ThreadPoolExecutor(max_workers=32) as executor:
                     left_images = list(executor.map(self.load_image,left_paths))
                     right_images = list(executor.map(self.load_image,right_paths))
@@ -119,6 +121,7 @@ class AsyncTemporalDataLoader(Dataset):
                             concat_images = list(executor.map(self.transform_img,concat_images))
 
             input_cam = torch.stack(concat_images)
+
             # input_cam = torch.randn(2,3,224,448)
             # for image in concat_images:
             #     image = concat_images[0].permute(1,2,0).numpy()
@@ -137,7 +140,11 @@ class AsyncTemporalDataLoader(Dataset):
             torch.tensor(seq_block_raw["imu_gyro_x"].to_list()),torch.tensor(seq_block_raw["imu_gyro_y"].to_list()),torch.tensor(seq_block_raw["imu_gyro_z"].to_list())]).permute(1,0)
         # input_imu = torch.randn(5,6)
         if self.inputs["yaw_hist"]:
-            yaw_hist = torch.tensor([seq_block_raw["yaw"].iloc[0]]).unsqueeze(1)
+            seq_block_10hz = seq_block_raw.iloc[::4].reset_index(drop=True) # get 10Hz sequence block
+            if self.single_test:
+                yaw_hist = torch.tensor([seq_block_10hz["yaw"].iloc[0]]).unsqueeze(1)
+            else:
+                yaw_hist = torch.tensor([seq_block_10hz["yaw"].iloc[:-1]]).squeeze().unsqueeze(1) # grab all but the last since we're predicting the last
             # inject artifical noise so we don't train on pure truth
             # TODO: Make this option configurable (differs from testing and training)
             # noisy_yaw_hist = self.inject_noise_to_yaw_hist(yaw_hist, [0.00876, 0.0349], 0.8) # std is approx between [0.5 and 2] deg
@@ -225,9 +232,9 @@ class AsyncTemporalDataLoader(Dataset):
                     outputs (torch.tensor):
                             Target outputs.
             """
-            pose1 = (seq_block["X"].iloc[0], seq_block["Y"].iloc[0], seq_block["yaw"].iloc[0])
-            pose2 = (seq_block["X"].iloc[-1], seq_block["Y"].iloc[-1], seq_block["yaw"].iloc[-1])
-            dx_body, dy_body, dyaw = self.tangent_to_body_frame_translation(pose1, pose2)
+            # pose1 = (seq_block["X"].iloc[0], seq_block["Y"].iloc[0], seq_block["yaw"].iloc[0])
+            # pose2 = (seq_block["X"].iloc[-1], seq_block["Y"].iloc[-1], seq_block["yaw"].iloc[-1])
+            # dx_body, dy_body, dyaw = self.tangent_to_body_frame_translation(pose1, pose2)
             # yaw = seq_block["yaw"].iloc[-1] # most current yaw to predict
             # sin_yaw = np.sin(yaw) 
             # cos_yaw = np.cos(yaw)
@@ -247,11 +254,16 @@ class AsyncTemporalDataLoader(Dataset):
                 dx_body_.append(dx_body)
                 dy_body_.append(dy_body)
                 dyaw_.append(dyaw)
+            # yaw = seq_block_10hz["yaw"].iloc[1:] # grab all but the first since it's our target (1st is used to initialize)
+            # sin_yaw = np.sin(yaw).tolist()
+            # cos_yaw = np.cos(yaw).tolist()
+            # outputs = [dx_body_, dy_body_, dyaw_, yaw.to_list()]
+            # outputs = [dx_body_, dy_body_, dyaw_, sin_yaw, cos_yaw]
             outputs = [dx_body_, dy_body_, dyaw_]
-            
-            # outputs = [dx_body, dx_body, dyaw]
+
+            # outputs = [dx_body, dy_body, dyaw]
             outputs = torch.as_tensor(outputs)
-            
+            # outputs = outputs.unsqueeze(dim=1)
             return outputs
         
     def tangent_to_body_frame_translation(self, pose1, pose2):

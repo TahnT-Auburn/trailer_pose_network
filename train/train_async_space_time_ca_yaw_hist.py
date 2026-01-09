@@ -29,7 +29,7 @@ SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
 WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_yaw_hist"
 WEIGHT_FILE = "async_space_time_yaw_hist_v5.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
-SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+SAVE_WEIGHTS = None
 
 PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_yaw_hist\\async_space_time_yaw_hist_v4.pth"
 PRETRAINED = False
@@ -73,7 +73,7 @@ def train():
                                         sequence_root_raw=SEQ_ROOT_RAW,
                                         sequential_lookback=NUM_FRAMES,
                                         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':True},
-                                        reduce={'target_column':'yaw', 'target_size':5000},
+                                        reduce={'target_column':'yaw', 'target_size':500},
                                         transform_img=v2.Compose([
                                             v2.ToPILImage(),
                                             v2.Resize(IMG_SIZE),

@@ -8,13 +8,13 @@ from tqdm import tqdm
 
 import torch
 import torch.nn as nn
+import torchvision
 from torchvision import transforms
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader, random_split
-import pytorch_warmup as warmup
 
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
-from trailer_pose_network.models.spacetime.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
+from trailer_pose_network.models.spacetime.async_st_ca_rn import AsyncSpaceTimeCrossAttentionResNet
 
 from trailer_pose_network.trainer import Trainer
 
@@ -23,61 +23,70 @@ from trailer_pose_network.trainer import Trainer
 
 # === FILE LOADING ===
 SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02\\"
-SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02\\"            
+SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02\\" 
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time"
-WEIGHT_FILE = "async_space_time_cross_attn_v3.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn_acc_yaw"
+WEIGHT_FILE = "async_st_ca_rn_acc_yaw_v4.pth"
 WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 # === DATALOADER PARAMETERS ===
-NUM_FRAMES = 2
+SEQ_LOOKBACK = 2
 IMG_SIZE = (224,448)
 BATCH_SIZE = 6
+VAL_RATIO = 0.2
 NUM_WORKERS = 4
 
 # === MODEL PARAMETERS ===
+NUM_DELTAS = 1
 NUM_FRAMES = 2
 NUM_IMU_SAMPLES = 5
 EMBED_DIM = 384
 NUM_HEADS = 8
-DEPTH = 12
+DEPTH = 8
 PATCH_SIZE = 16
+
 IN_CHANNELS = 3
 IMU_CHANNELS = 8
 DROPOUT = 0.
 NUM_OUTPUTS = 3
 
 #%%
+# test
 def test():
     # Load dataset
-    test_set = AsyncTemporalDataLoader(sequence_root_processed=SEQ_ROOT_PROCESSED,
-                                        sequence_root_raw=SEQ_ROOT_RAW,
-                                        single_test=True,
-                                        sequential_lookback=NUM_FRAMES,
-                                        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-                                        # reduce={'target_column':'steer_ang', 'target_size':100},
-                                        transform_img=v2.Compose([
-                                            v2.ToPILImage(),
-                                            v2.Resize(IMG_SIZE),
-                                            v2.ToTensor(),
-                                        ]),
-                                    )
-
+    test_set = AsyncTemporalDataLoader(
+        sequence_root_processed=SEQ_ROOT_PROCESSED,
+        sequence_root_raw=SEQ_ROOT_RAW,
+        sequential_lookback=SEQ_LOOKBACK,
+        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
+        transform_img=v2.Compose([
+            v2.ToPILImage(),
+            v2.Resize(IMG_SIZE),
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            ),
+        ]),
+    )
     # Generate loaders
     test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-
     # Load model
-    model = AsyncSpaceTimeCrossAttention(IMG_SIZE,
-                                         PATCH_SIZE,
-                                         IN_CHANNELS,
-                                         EMBED_DIM,
-                                         NUM_FRAMES,
-                                         NUM_IMU_SAMPLES,
-                                         IMU_CHANNELS,
-                                         NUM_HEADS,
-                                         DEPTH,
-                                         DROPOUT,
-                                         NUM_OUTPUTS)
+    model = AsyncSpaceTimeCrossAttentionResNet(
+        resnet_model=torchvision.models.resnet34(weights=None),
+        num_deltas=NUM_DELTAS,
+        img_size=IMG_SIZE,
+        seqential_lookback=SEQ_LOOKBACK,
+        in_channels=IN_CHANNELS,
+        embed_dim=EMBED_DIM,
+        num_frames=NUM_FRAMES,
+        num_imu_samples=NUM_IMU_SAMPLES,
+        imu_channels=IMU_CHANNELS,
+        num_heads=NUM_HEADS,
+        depth=DEPTH,
+        dropout=DROPOUT,
+    )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Device is Use: %s' % device)
     model = model.to(device)
@@ -85,6 +94,13 @@ def test():
     state_dict = torch.load(WEIGHT_PATH)
     model.load_state_dict(state_dict)
     
+    # freeze batch norm layers
+    for module in model.modules():
+        if isinstance(module, nn.BatchNorm2d):
+            module.eval()
+            module.weight.requires_grad = False
+            module.bias.requires_grad = False
+            
     # evalulate single model
     est_array = []
     truth_array = []
@@ -92,7 +108,7 @@ def test():
     with torch.no_grad():
         model.eval()
         for t, (x,y) in enumerate(tqdm(test_loader)):
-            
+
             x[0] = x[0].to(device=device, dtype=torch.float32)
             x[1] = x[1].to(device=device, dtype=torch.float32)
 
@@ -104,11 +120,11 @@ def test():
             est_array.append(est)
             truth_array.append(y)
             
-    est_array = torch.cat(est_array).cpu().numpy()
-    truth_array = torch.cat(truth_array).cpu().numpy()
+    est_array = torch.cat(est_array).squeeze().cpu().numpy()
+    truth_array = torch.cat(truth_array).squeeze().cpu().numpy()
     
     print("Evaluation Complete")
-
+    
     return est_array, truth_array, test_set
 
 # Utility functions
@@ -222,24 +238,15 @@ if __name__ == "__main__":
     
     plt.subplot(311)
     plt.title('Odom Error')
-    plt.plot(dx_body_truth - dx_body)
+    plt.plot(dx_body_truth.squeeze() - dx_body)
     plt.ylabel('dx (m)')
     plt.subplot(312)
-    plt.plot(dy_body_truth - dy_body)
+    plt.plot(dy_body_truth.squeeze() - dy_body)
     plt.ylabel('dy (m)')
     plt.subplot(313)
-    plt.plot(np.rad2deg(dyaw_truth - dyaw))
+    plt.plot(np.rad2deg(dyaw_truth.squeeze() - dyaw))
     plt.ylabel('dyaw (deg)')
     plt.tight_layout()
     plt.show()
     
-    # #%%
-    # # write output to csv for test (DELETE LATER)
-    # output_file = "model_odom_outputs.csv"
-    # data = {
-    #     'dx_body': dx_body,
-    #     'dy_body': dy_body,
-    #     'dyaw': dyaw
-    # }
-    # df = pd.DataFrame(data)
-    # df.to_csv(output_file, index=False)
+
