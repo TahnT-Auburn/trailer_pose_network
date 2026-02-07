@@ -16,20 +16,26 @@ import pytorch_warmup as warmup
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
 from trailer_pose_network.models.spacetime.async_st_ca_rn import AsyncSpaceTimeCrossAttentionResNet
 
-from trailer_pose_network.trainers.trainer_closed_loop_deltas import Trainer
+from trailer_pose_network.trainers.trainer_acc_yaw_deltas import Trainer
 
 #%%
 # Set Global variables
 
 # === FILE LOADING ===
-SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
-SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
+# SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+# SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
 
-SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\experimental\\10Hz\\original\\"
-SEQ_ROOT_RAW_VAL = "D:\\TestingData\\experimental\\40Hz\\original\\"
+# SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\experimental\\10Hz\\original\\"
+# SEQ_ROOT_RAW_VAL = "D:\\TestingData\\experimental\\40Hz\\original\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn_acc_yaw"
-WEIGHT_FILE = "async_st_ca_rn_acc_yaw_v4.pth"
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\simulation\\10Hz\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
+
+SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
+SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_st_ca_rn_acc_yaw\\"
+WEIGHT_FILE = "async_st_ca_rn_acc_yaw_v2.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
 
@@ -37,10 +43,9 @@ PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\
 PRETRAINED = False
 
 # === DATALOADER PARAMETERS ===
-SEQ_LOOKBACK = 8
-IMG_SIZE = (224,448)
+SEQ_LOOKBACK = 2
+IMG_SIZE = (224,224)
 BATCH_SIZE = 4
-VAL_RATIO = 0.2
 NUM_WORKERS = 4
 PIN_MEMORY = True
 PREFETCH_FACTOR = 2
@@ -65,8 +70,8 @@ DROPOUT = 0.
 NUM_OUTPUTS = 4
 
 # === TRAINING PARAMETERS ===
-NUM_EPOCHS = 50
-LR = 1e-4
+NUM_EPOCHS = 30
+LR = 3e-5
 LOSS_SCALE = [1, 1, 5]
 LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
 # LOSS_SCALE = 1e1
@@ -87,16 +92,16 @@ def train():
         sequence_root_raw=SEQ_ROOT_RAW,
         sequential_lookback=SEQ_LOOKBACK,
         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-        reduce={'target_column':'yaw', 'target_size':20000},
+        reduce={'target_column':'steer_ang', 'target_size':3000},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            ),
+            # v2.Normalize(
+            #     mean=[0.485, 0.456, 0.406],
+            #     std=[0.229, 0.224, 0.225]
+            # ),
         ]),
     )
     # load val set
@@ -105,16 +110,16 @@ def train():
         sequence_root_raw=SEQ_ROOT_RAW_VAL,
         sequential_lookback=SEQ_LOOKBACK,
         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-        reduce={'target_column':'yaw', 'target_size':2500},
+        # reduce={'target_column':'yaw', 'target_size':10},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            ),
+            # v2.Normalize(
+            #     mean=[0.485, 0.456, 0.406],
+            #     std=[0.229, 0.224, 0.225]
+            # ),
         ]),
     )
 
@@ -149,9 +154,9 @@ def train():
         
     # Set up training
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*10, T_mult=2)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS - WARMUP_PERIOD)*len(loader_train), eta_min=1e-9 )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
     warmup_period = len(loader_train) * WARMUP_PERIOD
     warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
     
@@ -247,7 +252,7 @@ if __name__ == "__main__":
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss1 (Trans)')
         plt.subplot(615)
-        plt.plot(outs["val_rot_lost_hist"])
+        plt.plot(outs["val_rot_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss2 (Rot)')
         plt.subplot(616)

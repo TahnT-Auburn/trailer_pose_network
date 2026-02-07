@@ -1,0 +1,71 @@
+Weights saved to: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\experimental\async_st_ca_rn_acc_yaw\async_st_ca_rn_acc_yaw_v4.pth
+Outputs = [dx, dy, dyaw]
+RMSEs at final checkpoint (Epoch 46 of 50):
+    Training RMSE: [0.00126899 0.00159729 0.0096543  0.03867421]
+    Validation RMSE: [0.00092353 0.00279026 0.00843777 0.03852594]
+
+# === FILE LOADING ===
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
+
+SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW_VAL = "D:\\TestingData\\experimental\\40Hz\\original\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn_acc_yaw"
+WEIGHT_FILE = "async_st_ca_rn_acc_yaw_v4.pth"
+WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+
+PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn_acc_yaw\\async_st_ca_rn_acc_yaw_v3.pth"
+PRETRAINED = False
+
+# === DATALOADER PARAMETERS ===
+SEQ_LOOKBACK = 8
+IMG_SIZE = (224,448)
+BATCH_SIZE = 4
+VAL_RATIO = 0.2
+NUM_WORKERS = 4
+PIN_MEMORY = True
+PREFETCH_FACTOR = 2
+PERSISTANT_WORKERS = True
+
+# === MODEL PARAMETERS ===
+NUM_DELTAS = 1
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 8
+DEPTH = 8
+PATCH_SIZE = 16
+
+IN_CHANNELS = 3
+IMU_CHANNELS = 8
+DROPOUT = 0.
+NUM_OUTPUTS = 4
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 50
+LR = 1e-4
+LOSS_SCALE = [1, 1, 5]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
+# LOSS_SCALE = 1e1
+# LOSS_FUNC = nn.L1Loss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = False
+CHECK_ACCURACY = True
+CHECK_GRADIENTS = False
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=NUM_EPOCHS*len(loader_train), eta_min=0.0 )
+warmup_period = len(loader_train) * WARMUP_PERIOD
+warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Uses accumlated yaw from dyaw to compute additional loss. Similar issues with first rendition (v3 weight).
+- Network is learning and produces impressive estimates. The issue is small errors in our predictions causes large errors in what we care about (yaw, position)
+- If this architecture is to used, we must exploit a way to make it useful in the filter because it most likely doesn't have much room to improve.
+- IMPORTANT UPDATE: Sequence 06 traninging data seems to be almost perfect and is also about 20k in samples. Wonder if the reducer just isolated this set. Next steps is the pretrain from these weights with sequences 01 and 03!
+- NOTE: May need to go back and retraining from scratch to get plots of Losses and RMSEs for the thesis. Expect another long training sesh.

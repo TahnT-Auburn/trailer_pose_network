@@ -577,8 +577,6 @@ def checkAccuracy(est_history, truth_history):
     # convert to numpy
     rmse = rmse.cpu().numpy().squeeze()
 
-
-
     # take mean across temporal dim
     # rmse = np.mean(rmse, axis=1)
     

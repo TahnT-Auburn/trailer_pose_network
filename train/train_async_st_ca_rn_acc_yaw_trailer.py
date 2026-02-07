@@ -13,10 +13,11 @@ from torchvision.transforms import v2
 from torch.utils.data import DataLoader, random_split
 import pytorch_warmup as warmup
 
-from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
-from trailer_pose_network.models.spacetime.async_st_ca_rn_yaw_hist import AsyncSpaceTimeCrossAttentionResNetYawHist
 
-from trailer_pose_network.trainers.trainer_closed_loop_deltas_plus_yaw_hist import Trainer
+from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
+from trailer_pose_network.models.spacetime.async_st_ca_rn_trailer import AsyncSpaceTimeCrossAttentionResNet
+
+from trailer_pose_network.trainers.trainer_acc_yaw_deltas_and_trailer import Trainer
 
 #%%
 # Set Global variables
@@ -34,26 +35,47 @@ SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
 SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
 SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_st_ca_rn_yaw_hist"
-WEIGHT_FILE = "async_st_ca_rn_yaw_hist_v1.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_st_ca_rn_acc_yaw_trailer\\imu_0\\"
+WEIGHT_FILE = "async_st_ca_rn_acc_yaw_trailer_imu0_v2.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
 
-PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn_yaw_hist\\async_st_ca_rn_yaw_hist_v1.pth"
+OUT_LOG_PATH = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_st_ca_rn_acc_yaw_trailer\\imu_0\\sim_results2\\train_log.csv"
+
+PRETRAINED_WEIGHTS = None
 PRETRAINED = False
 
 # === DATALOADER PARAMETERS ===
-SEQ_LOOKBACK = 8
-IMG_SIZE = (224,448)
+SEQ_LOOKBACK = 2
+IMG_SIZE = (224,224)
 BATCH_SIZE = 4
 NUM_WORKERS = 4
 PIN_MEMORY = True
 PREFETCH_FACTOR = 2
 PERSISTANT_WORKERS = True
-NUM_WORKERS = 0
-PIN_MEMORY = False
-PREFETCH_FACTOR = None
-PERSISTANT_WORKERS = False
+# NUM_WORKERS = 0
+# PIN_MEMORY = False
+# PREFETCH_FACTOR = None
+# PERSISTANT_WORKERS = False
+# PREPROCESS_DATA = { # SIM TRAINING DATA STATISTICS (IMU0)
+#     "mean_steer_ang": 0.00010474232904788316, 
+#     # "mean_vx": 18.287964405986905,
+#     "mean_imu_accel_x": -0.08054565556000937, 
+#     "mean_imu_accel_y": 0.059256087349158076, 
+#     "mean_imu_accel_z": -9.820629497778299, 
+#     "mean_imu_gyro_x": -0.0004527679883824836, 
+#     "mean_imu_gyro_y": 1.7486348199251608e-06,
+#     "mean_imu_gyro_z": -0.0007029802208594473,
+#     "std_steer_ang": 0.11945972354652491, 
+#     # "std_vx": 9.763229616274344,
+#     "std_imu_accel_x": 0.38069991167038575, 
+#     "std_imu_accel_y": 2.0534440012091593, 
+#     "std_imu_accel_z": 0.26311322761089984, 
+#     "std_imu_gyro_x": 0.007918682043185972, 
+#     "std_imu_gyro_y": 0.002558814472160346, 
+#     "std_imu_gyro_z": 0.16526482988751023
+# }
+PREPROCESS_DATA = None
 
 # === MODEL PARAMETERS ===
 NUM_DELTAS = 1
@@ -62,25 +84,25 @@ NUM_IMU_SAMPLES = 5
 EMBED_DIM = 384
 NUM_HEADS = 8
 DEPTH = 8
-PATCH_SIZE = 16
-
-IN_CHANNELS = 3
 IMU_CHANNELS = 8
-DROPOUT = 0.
+DROPOUT = 0.1
+MODALITY_DROPOUT = {
+    "imu_dropout_rate": 0.0,
+    "cam_dropout_rate": 0.0
+}
 NUM_OUTPUTS = 5
 
 # === TRAINING PARAMETERS ===
-NUM_EPOCHS = 20
-LR = 1e-4
-LOSS_SCALE = [1, 1, 5, 2]
+NUM_EPOCHS = 50
+LR = 3e-5
+LOSS_SCALE = [1, 1, 1, 5]
 LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
-# LOSS_SCALE = 1e1
-# LOSS_FUNC = nn.L1Loss()
 BETAS = (0.9, 0.999)
-WEIGHT_DECAY = 0.01
+WEIGHT_DECAY = 0.005
 WARMUP_PERIOD = 2 # The number of epochs to warmup
 RUN_VAL = True
-OVERFIT_DETECTOR = False
+OVERFIT_DETECTOR = True
+EARLY_STOPPING = True
 CHECK_ACCURACY = True
 CHECK_GRADIENTS = False
 
@@ -91,64 +113,62 @@ def train():
         sequence_root_processed=SEQ_ROOT_PROCESSED,
         sequence_root_raw=SEQ_ROOT_RAW,
         sequential_lookback=SEQ_LOOKBACK,
-        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':True},
-        reduce={'target_column':'yaw', 'target_size':10000},
+        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
+        # reduce={'target_column':'steer_ang', 'target_size':3000},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            ),
+            # v2.Normalize(
+            #     mean=[0.485, 0.456, 0.406],
+            #     std=[0.229, 0.224, 0.225]
+            # ),
         ]),
+        get_data_stats=True,
+        preprocess_data=PREPROCESS_DATA,
     )
     # load val set
     val_set = AsyncTemporalDataLoader(
         sequence_root_processed=SEQ_ROOT_PROCESSED_VAL,
         sequence_root_raw=SEQ_ROOT_RAW_VAL,
         sequential_lookback=SEQ_LOOKBACK,
-        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':True},
-        reduce={'target_column':'yaw', 'target_size':5000},
+        inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
+        reduce={'target_column':'steer_ang', 'target_size':1500},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            ),
+            # v2.Normalize(
+            #     mean=[0.485, 0.456, 0.406],
+            #     std=[0.229, 0.224, 0.225]
+            # ),
         ]),
+        preprocess_data=PREPROCESS_DATA,
     )
 
-    
+
     # Generate loaders
-    loader_train = DataLoader(
-        train_set, batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=NUM_WORKERS,
-        pin_memory=PIN_MEMORY,
-        prefetch_factor=PREFETCH_FACTOR,
-        persistent_workers=PERSISTANT_WORKERS
-    )
-    loader_val = DataLoader(
-        val_set, batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=NUM_WORKERS,
-        pin_memory=PIN_MEMORY,
-        prefetch_factor=PREFETCH_FACTOR,
-        persistent_workers=PERSISTANT_WORKERS
-    )
+    loader_train = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY, prefetch_factor=PREFETCH_FACTOR, persistent_workers=PERSISTANT_WORKERS)
+    loader_val = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY, prefetch_factor=PREFETCH_FACTOR, persistent_workers=PERSISTANT_WORKERS)
     
     # Load model
-    model = AsyncSpaceTimeCrossAttentionResNetYawHist(
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print('Device is Use: %s' % device)
+    # resent models
+    # resnet_model = torchvision.models.resnet34(weights='IMAGENET1K_V1')
+    # resnet_hold_hitch = torchvision.models.resnet34(weights='IMAGENET1K_V1')
+    # resnet_model = resnet_model.to(device)
+    # resnet_hold_hitch = resnet_hold_hitch.to(device)
+    
+    # full model
+    model = AsyncSpaceTimeCrossAttentionResNet(
         resnet_model=torchvision.models.resnet34(weights='IMAGENET1K_V1'),
+        resnet_model_hitch=torchvision.models.resnet34(weights='IMAGENET1K_V1'),
         num_deltas=NUM_DELTAS,
         img_size=IMG_SIZE,
         seqential_lookback=SEQ_LOOKBACK,
-        in_channels=IN_CHANNELS,
         embed_dim=EMBED_DIM,
         num_frames=NUM_FRAMES,
         num_imu_samples=NUM_IMU_SAMPLES,
@@ -156,9 +176,10 @@ def train():
         num_heads=NUM_HEADS,
         depth=DEPTH,
         dropout=DROPOUT,
+        modality_dropout=MODALITY_DROPOUT,
     )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print('Device is Use: %s' % device)
+    
     model = model.to(device)
     
     # Load pretrained weights if prompted
@@ -168,9 +189,8 @@ def train():
         
     # Set up training
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*10, T_mult=2)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS - WARMUP_PERIOD)*len(loader_train), eta_min=0.0)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=NUM_EPOCHS*len(loader_train), eta_min=0.0 )
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
     warmup_period = len(loader_train) * WARMUP_PERIOD
     warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
     
@@ -183,13 +203,16 @@ def train():
         loader_val=loader_val,
         run_val=RUN_VAL,
         overfit_detector=OVERFIT_DETECTOR,
+        early_stopping=EARLY_STOPPING,
         loss_scale=LOSS_SCALE,
         loss_save_interval=None,
         device=device,
         check_accuracy=CHECK_ACCURACY,
         check_gradients=CHECK_GRADIENTS,
         verbose=len(loader_train),
-        save_weights=SAVE_WEIGHTS
+        save_weights=SAVE_WEIGHTS,
+        checkpoint_interval=None,
+        save_outs=OUT_LOG_PATH,
     )
     
     # Train model
@@ -213,7 +236,6 @@ if __name__ == "__main__":
     
     if RUN_VAL:
         # plot loss
-        plt.figure()
         plt.subplot(4,1,1)
         plt.plot(outs["lr_history"])
         plt.xlabel('Iterations')
@@ -233,7 +255,6 @@ if __name__ == "__main__":
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
     else:
-        plt.figure()
         plt.subplot(3,1,1)
         plt.plot(outs["lr_history"])
         plt.xlabel('Iterations')
@@ -249,61 +270,43 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
+
+    plt.figure()
+    plt.suptitle('Taining Losses vs. Iteration')
+    plt.subplot(411)
+    plt.plot(outs["train_trans_loss_hist"])
+    plt.xlabel('Iterations')
+    plt.ylabel('Trans loss')
+    plt.subplot(412)
+    plt.plot(outs["train_rot_loss_hist"])
+    plt.xlabel('Iterations')
+    plt.ylabel('Rot loss')
+    plt.subplot(413)
+    plt.plot(outs["train_hitch_loss_hist"])
+    plt.xlabel('Iterations')
+    plt.ylabel('Hitch loss')
+    plt.subplot(414)
+    plt.plot(outs["train_acc_yaw_loss_hist"])
+    plt.xlabel('Iterations')
+    plt.ylabel('Acc yaw loss')
     if RUN_VAL:
         plt.figure()
         plt.subplot(411)
-        plt.title('Train losses')
-        plt.plot(outs["train_trans_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss1 (Trans)')
-        plt.subplot(412)
-        plt.plot(outs["train_rot_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss2 (Rot)')
-        plt.subplot(413)
-        plt.plot(outs["train_abs_yaw_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss3 (Abs yaw)')
-        plt.subplot(414)
-        plt.plot(outs["train_acc_yaw_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss4 (Acc yaw)')
-        
-        plt.figure()
-        plt.subplot(411)
-        plt.title('Val Losses')
         plt.plot(outs["val_trans_loss_hist"])
         plt.xlabel('Iterations')
-        plt.ylabel('Val Loss1 (Trans)')
+        plt.ylabel('Trans loss')
         plt.subplot(412)
-        plt.plot(outs["val_rot_lost_hist"])
+        plt.plot(outs["val_rot_loss_hist"])
         plt.xlabel('Iterations')
-        plt.ylabel('Val Loss2 (Rot)')
+        plt.ylabel('Rot loss')
         plt.subplot(413)
-        plt.plot(outs["val_acc_yaw_loss_hist"])
+        plt.plot(outs["val_hitch_loss_hist"])
         plt.xlabel('Iterations')
-        plt.ylabel('Val Loss3 (Acc yaw)')
+        plt.ylabel('Hitch loss')
         plt.subplot(414)
         plt.plot(outs["val_acc_yaw_loss_hist"])
         plt.xlabel('Iterations')
-        plt.ylabel('Val Loss3 (Acc yaw)')
-    else:
-        plt.subplot(411)
-        plt.plot(outs["train_trans_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss1 (Trans)')
-        plt.subplot(412)
-        plt.plot(outs["train_rot_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss2 (Rot)')
-        plt.subplot(413)
-        plt.plot(outs["train_abs_yaw_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss3 (Abs yaw)')
-        plt.subplot(414)
-        plt.plot(outs["train_acc_yaw_loss_hist"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss3 (Acc yaw)')
+        plt.ylabel('Acc yaw loss')
     plt.tight_layout()
     plt.show()
     
@@ -333,31 +336,44 @@ if __name__ == "__main__":
             plt.ylabel('OUTPUT' + state_num + ' RMSE')
             plt.xlabel('Epochs')
             
+            
+            
+            
 
-    
-        # hitch_rmse_train = train_rmse[:,0]
-        # hr_rmse_train = train_rmse[:,1]
-        # hitch_rmse_val = val_rmse[:,0]
-        
-        # hr_rmse_val = val_rmse[:,1]
-        # state3_rmse_train = train_rmse[:,2]
-        # state3_rmse_val = val_rmse[:,2]
-        # plt.subplot(3,1,1)
-        # plt.plot(hitch_rmse_train, '-o')
-        # plt.plot(hitch_rmse_val, '-o')
-        # plt.legend(['train', 'val'], loc='upper right')
-        # plt.ylabel('Hitch RMSE [deg]')
-        # plt.xlabel('Epochs')
-        # plt.subplot(3,1,2)
-        # plt.plot(hr_rmse_train, '-o')
-        # plt.plot(hr_rmse_val, '-o')
-        # plt.ylabel('Hitch Rate RMSE [deg/s]')
-        # plt.xlabel('Epochs')
-        # plt.tight_layout()
-        # plt.subplot(3,1,3)
-        # plt.plot(state3_rmse_train, '-o')
-        # plt.plot(state3_rmse_val, '-o')
-        # plt.ylabel('State3 RMSE [deg/s]')
-        # plt.xlabel('Epochs')
-        # plt.tight_layout()
-        # plt.show()
+# PREPROCESS_DATA = {     # SIM TRAINING DATA STATISTICS (IMU1)
+#     "mean_steer_ang": 0.00010474232904788316, 
+#     "mean_vx": 18.287964405986905, 
+#     "mean_imu_accel_x": -0.03210047741594339, 
+#     "mean_imu_accel_y": 0.02469601869018359, 
+#     "mean_imu_accel_z": -9.815943088412155, 
+#     "mean_imu_gyro_x": -0.001249379855227762, 
+#     "mean_imu_gyro_y": 0.0008506330686480256, 
+
+#     "mean_imu_gyro_z": -0.00031432984528056176,
+#     "std_steer_ang": 0.11945972354652493, 
+#     "std_vx": 9.763229616274344, 
+#     "std_imu_accel_x": 0.258235143710354, 
+#     "std_imu_accel_y": 2.0279488102074175, 
+#     "std_imu_accel_z": 0.12271902157743174, 
+#     "std_imu_gyro_x": 0.009022401167484217, 
+#     "std_imu_gyro_y": 0.0037328788472177263, 
+#     "std_imu_gyro_z": 0.165953626021579
+# }
+# PREPROCESS_DATA = { # CURRENTLY THE TEST DATA STATISICS (IMU1) (FOR DATA SWAP)
+#     "mean_steer_ang": -0.0018256783213060977,
+#     "mean_vx": 11.617652042642014,
+#     "mean_imu_accel_x": -0.07951864128677506,
+#     "mean_imu_accel_y": -0.08383250730508374,
+#     "mean_imu_accel_z": -9.856500136352544,
+#     "mean_imu_gyro_x": -0.003448715528186841,
+#     "mean_imu_gyro_y": -0.0008867832780533307,
+#     "mean_imu_gyro_z": -0.002825871540460926,
+#     "std_steer_ang": 0.12929468914605133, 
+#     "std_vx": 3.5636214327853173, 
+#     "std_imu_accel_x": 0.2574701751675872, 
+#     "std_imu_accel_y": 2.342593752066911, 
+#     "std_imu_accel_z": 0.13390621690756863, 
+#     "std_imu_gyro_x": 0.01692068461458399, 
+#     "std_imu_gyro_y": 0.006417072237157534, 
+#     "std_imu_gyro_z": 0.20520836409808133
+# }

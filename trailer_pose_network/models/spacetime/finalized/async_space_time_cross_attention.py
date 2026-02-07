@@ -3,15 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 import math
-import torchvision
 
-class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
+class AsyncSpaceTimeCrossAttention(nn.Module):
     def __init__(
         self,
-        resnet_model,
         img_size = (224,224),
-        seqential_lookback = 2,
-        num_deltas = 1,
+        patch_size = 16,
         in_channels = 3,
         embed_dim = 768,
         num_frames = 2,
@@ -20,33 +17,30 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
         num_heads = 12,
         depth = 12, # TODO: make depth a list which spans all three transformers used
         dropout = 0.,
-    ): 
+        num_outputs = 3,
+    ):
         super().__init__()
-        assert img_size[0]*img_size[1] % 8 == 0, \
-            f"Input image size ({img_size[0],img_size[1]}) are not compatible with ResNet encoder. W,H must be divisible my 8."
-            
-        self.sequential_lookback = seqential_lookback
-        self.num_deltas = num_deltas
+        assert img_size[0]*img_size[1] % patch_size == 0, \
+            f"Input image size ({img_size[0],img_size[1]}) and patch size ({patch_size}) are not compatible."
+
         self.num_frames = num_frames
         self.num_imu_samples = num_imu_samples
         self.embed_dim = embed_dim
+        self.num_patches = (img_size[0]*img_size[1]) // patch_size ** 2
         self.dropout = nn.Dropout(dropout)
         
-        # === IMAGE RESNET ENCODER ===
-        # prepare resnet model with custom head
-        in_feats = resnet_model.fc.in_features
-        # replace resnet classification head with custom head. 
-        resnet_model.fc = nn.Sequential(
-            nn.Linear(in_feats, embed_dim),
-            nn.GELU(),
-            nn.Linear(embed_dim, embed_dim * 2),
-            nn.GELU(),
-            nn.Linear(embed_dim * 2, embed_dim),
-            nn.GELU(),
+        # === IMAGE EMBEDDING ===
+        # Patch embedding for spatial tokenization
+        self.patch_embed = nn.Conv2d(
+            in_channels, embed_dim,
+            kernel_size=patch_size, stride=patch_size
         )
-        self.resnet_encoder = resnet_model
         
-        self.visual_temporal_pos_embedding = nn.Parameter(
+        # Positional embeddings (spatial and temporal)
+        self.spatial_pos_embedding = nn.Parameter(
+            torch.randn(1, self.num_patches, embed_dim) * 0.02
+        )
+        self.temporal_pos_embedding = nn.Parameter(
             torch.randn(1, self.num_frames, embed_dim) * 0.02
         )
         
@@ -69,13 +63,13 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
         
         # === SPACE-TIME TRANSFORMER BLOCKS FOR IMAGES ===
         self.visual_blocks = nn.ModuleList([
-            VisualTemporalBlock(embed_dim, num_heads, dropout=dropout)
+            SpaceTimeBlock(embed_dim, num_heads, dropout=dropout)
             for _ in range(depth)
         ])
         
         # === TEMPORAL TRANSFORMER BLOCKS FOR IMU ===
         self.imu_blocks = nn.ModuleList([
-            ImuTemporalBlock(embed_dim, num_heads, dropout=dropout)
+            TemporalBlock(embed_dim, num_heads, dropout=dropout)
             for _ in range(depth)
         ])
 
@@ -86,8 +80,7 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
         ])
         
         # === FUSION STRATEGY ===
-        self.fusion_strat = TaskSpecificFusionStrategy(embed_dim, num_heads, dropout)
-        # self.fusion_strat = GloabalPoolFusionStrategy(embed_dim=embed_dim, dropout=dropout)
+        self.fusion_strat = FusionStrategy(embed_dim, dropout)
         
         # === NETWORK HEADS === 
         self.final_norm_trans = nn.LayerNorm(embed_dim)
@@ -96,7 +89,7 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
             nn.GELU(),
             nn.Linear(embed_dim * 2, embed_dim),
             nn.GELU(),
-            nn.Linear(embed_dim, 2 * self.num_deltas),
+            nn.Linear(embed_dim, 2),
         )
 
         self.final_norm_rot = nn.LayerNorm(embed_dim)
@@ -105,7 +98,7 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
             nn.GELU(),
             nn.Linear(embed_dim * 2, embed_dim),
             nn.GELU(),
-            nn.Linear(embed_dim, 1 * self.num_deltas),
+            nn.Linear(embed_dim, 1),
         )
         
     def embed_images(self, images):
@@ -119,25 +112,28 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
         """
         B, T, C, H, W = images.shape
         
-        # generate visual features for each image and stack for full visual token
-        feats = []
-        for i in range(0,self.num_frames):
-            img = images[:,i]
-            feat = self.resnet_encoder(img)
-            feats.append(feat)
-        visual_tokens = torch.stack(feats, dim=1)
+        # Process all frames: [B*T, C, H, W] -> [B*T, D, H_p, W_p]
+        images_flat = rearrange(images, 'b t c h w -> (b t) c h w')
         
-        # img1 = images[:,0]
-        # img2 = images[:,1]
-        # feat1 = self.resnet_encoder(img1) #[B, D]
-        # feat2 = self.resnet_encoder(img2) #[B, D]
-        
-        # # stack features
-        # visual_tokens = torch.stack([feat1, feat2], dim=1)
-        
-        # add temporal positional embedding
-        visual_tokens = visual_tokens + self.visual_temporal_pos_embedding
+        # Patch embedding: [B*T, D, H_p, W_p]
+        patches = self.patch_embed(images_flat)
 
+        # Flatten spatial patches: [B*T, N_patches, D]
+        patches = rearrange(patches, 'bt d h w -> bt (h w) d')
+        
+        # Reshape back: [B, T, N_patches, D]
+        patches = rearrange(patches, '(b t) n d -> b t n d', b=B, t=T)
+
+        # Add spatial positional embedding
+        patches = patches + self.spatial_pos_embedding.unsqueeze(1)
+        
+        # Flatten for transformer: [B, T*N_patches, D]
+        visual_tokens = rearrange(patches, 'b t n d -> b (t n) d')
+        
+        # Add temporal positional embedding (repeat for each patch)
+        temporal_pos = repeat(self.temporal_pos_embedding, 'b t d -> b (t n) d', n=self.num_patches)
+        visual_tokens = visual_tokens + temporal_pos
+        
         # Add modality tokens
         visual_tokens = visual_tokens + self.visual_mod_token.expand(B, -1, -1)
         
@@ -185,9 +181,9 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
         visual_tokens = self.dropout(visual_tokens)
         imu_tokens = self.dropout(imu_tokens)
         
-        # === VISUAL FEATURE TIME ATTENTION ENCODER ===
+        # === VISUAL SPACE-TIME ATTENTION ENCODER ===
         for block in self.visual_blocks:
-            visual_tokens = block(visual_tokens)
+            visual_tokens = block(visual_tokens, self.num_frames, self.num_patches)
             
         # === IMU TIME ATTENTION ENCODER ===
         for block in self.imu_blocks:
@@ -198,60 +194,88 @@ class AsyncSpaceTimeCrossAttentionResNet(nn.Module):
             visual_tokens, imu_tokens = cross_block(visual_tokens, imu_tokens)
             
         # === FUSION OF VISUAL AND IMU TOKENS ===
-        trans_feat, rot_feat = self.fusion_strat(visual_tokens, imu_tokens)
-        # fused_tokens = self.fusion_strat(visual_tokens, imu_tokens)
+        fused_tokens = self.fusion_strat(visual_tokens, imu_tokens)
         
         # === FINAL NETWORK HEAD FOR PREDICTION ===
-        # trans_predictions = self.network_head_trans(self.final_norm_trans(fused_tokens))
-        # rot_predictions = self.network_head_rot(self.final_norm_rot(fused_tokens))
-        trans_predictions = self.network_head_trans(self.final_norm_trans(trans_feat))
-        rot_predictions = self.network_head_rot(self.final_norm_rot(rot_feat))
+        trans_predictions = self.network_head_trans(self.final_norm_trans(fused_tokens))
+        rot_predictions = self.network_head_rot(self.final_norm_rot(fused_tokens))
         # predictions =  torch.cat((trans_predictions, rot_predictions), dim=1)
         
-        # reshape to 2D
-        trans_predictions = trans_predictions.view(-1, 2, self.num_deltas)
-        rot_predictions = rot_predictions.view(-1, 1, self.num_deltas)
-        
         return trans_predictions, rot_predictions
-
-class VisualTemporalBlock(nn.Module):
-    """Temporal attention for visual tokens"""
-    def __init__(self, embed_dim, num_heads, dropout=0.):
+    
+class SpaceTimeBlock(nn.Module):
+    """Factorized space-time attention block"""
+    def __init__(self,
+                 embed_dim, num_heads, dropout=0.):
         super().__init__()
         
+        # Spatial attention (within each frame)
+        self.spatial_attn = nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=dropout, batch_first=True
+        )
+        self.spatial_norm = nn.LayerNorm(embed_dim)
+        
+        # Temporal attention (across frames for each spatial location)
         self.temporal_attn = nn.MultiheadAttention(
             embed_dim, num_heads, dropout=dropout, batch_first=True
         )
-        self.norm1 = nn.LayerNorm(embed_dim)
-        self.norm2 = nn.LayerNorm(embed_dim)
+        self.temporal_norm = nn.LayerNorm(embed_dim)
         
+        # Feed forward layer
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(embed_dim * 4, embed_dim),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout),
         )
+        self.mlp_norm = nn.LayerNorm(embed_dim)
         
-    def forward(self, x):
+    def forward(self, x, num_frames, num_patches):
+        """Space-time forward block
+
+        Args:
+            x (torch.tensor): [B, T*N_patches, D]
+            num_frames (int): Number of image frames.
+            num_patches (int): Number of image patches
         """
-        x: [B, T_visual, D]
-        """
-        # Temporal self-attention
-        x = self.norm1(x)
-        x_out, _ = self.temporal_attn(x, x, x)
-        x = x + x_out
-        # x = self.norm1(x)
+        B, seq_len, D = x.shape
         
-        # MLP
-        x = self.norm2(x)
+        # === SPATIAL ATTENTION ===
+        # Reshape the process each frame separately: [B*T, N_patches, D]
+        x_spatial = rearrange(x, 'b (t n) d -> (b t) n d', t=num_frames, n=num_patches)
+        
+        # Self-attention within each frame
+        x_spatial = self.spatial_norm(x_spatial)
+        x_spatial_attn, _ = self.spatial_attn(x_spatial, x_spatial, x_spatial)
+        x_spatial = x_spatial_attn + x_spatial # residual connection
+        # x_spatial = self.spatial_norm(x_spatial)
+        
+        # Reshape back: [B, T*N_patches, D]
+        x = rearrange(x_spatial, '(b t) n d -> b (t n) d', b=B, t=num_frames)
+        
+        # TEMPORAL ATTENTION ===
+        # Reshape to process each spatial location across time: [B*N_patches, T, D]
+        x_temporal = rearrange(x, 'b (t n) d -> (b n) t d', t=num_frames, n=num_patches)
+        
+        # Self-attention across time for each spatial location
+        x_temporal = self.temporal_norm(x_temporal)
+        x_temporal_attn, _ = self.temporal_attn(x_temporal, x_temporal, x_temporal)
+        x_temporal = x_temporal_attn + x_temporal # residual connection
+        # x_temporal = self.temporal_norm(x_temporal)
+        
+        # Reshape back: [B, T*N_patches, D]
+        x = rearrange(x_temporal, '(b n) t d -> b (t n) d', b=B, n=num_patches)
+        
+        # === FEED FORWARD ===
+        x = self.mlp_norm(x)
         x_mlp = self.mlp(x)
-        x = x + x_mlp
-        # x = self.norm2(x)
+        x = x_mlp + x # residual connection
+        # x = self.mlp_norm(x)
         
         return x
-    
-class ImuTemporalBlock(nn.Module):
+
+class TemporalBlock(nn.Module):
     """Temporal attention for IMU tokens"""
     def __init__(self, embed_dim, num_heads, dropout=0.):
         super().__init__()
@@ -300,8 +324,28 @@ class CrossModalAttention(nn.Module):
             embed_dim, num_heads, dropout=dropout, batch_first=True
         )
         
-        self.visual_norm = nn.LayerNorm(embed_dim)
-        self.imu_norm = nn.LayerNorm(embed_dim)
+        # small MLPs
+        self.visual_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, embed_dim),
+            nn.Dropout(dropout)
+        )
+        
+        self.imu_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, embed_dim),
+            nn.Dropout(dropout)
+        )
+                
+        self.visual_norm1 = nn.LayerNorm(embed_dim)
+        self.visual_norm2 = nn.LayerNorm(embed_dim)
+        self.imu_norm1 = nn.LayerNorm(embed_dim)
+        self.imu_norm2 = nn.LayerNorm(embed_dim)
+        
         
     def forward(self, visual_tokens, imu_tokens):
         """Forward block for cross attention
@@ -315,29 +359,45 @@ class CrossModalAttention(nn.Module):
         
         # === CROSS-MODAL ATTENTION ===
         
-        # Visual attending to IMU (what IMU info is relevant for visual features)
-        visual_tokens = self.visual_norm(visual_tokens)
-        visual_attended, _ = self.visual_to_imu_attn(
-            query=visual_tokens,
-            key=imu_tokens,
-            value=imu_tokens
-        )
-        visual_tokens = visual_tokens + visual_attended
-        # visual_tokens = self.visual_norm(visual_tokens)
+        # save off input for residual connection
+        visual_tokens_in = visual_tokens
+        imu_tokens_in = imu_tokens
+
+        # normalize tokens
+        visual_tokens_norm = self.visual_norm1(visual_tokens)
+        imu_tokens_norm = self.imu_norm1(imu_tokens)
         
-        # IMU attending to visual (what visual info is relevant for IMU features)
-        imu_tokens = self.imu_norm(imu_tokens)
-        imu_attended, _ = self.imu_to_visual_attn(
-            query=imu_tokens,
-            key=visual_tokens,
-            value=visual_tokens
+        # Visual attending to IMU (what IMU info is relevant for visual features)
+        visual_tokens, _ = self.visual_to_imu_attn(
+            query=visual_tokens_norm,
+            key=imu_tokens_norm,
+            value=imu_tokens_norm
         )
-        imu_tokens = imu_tokens + imu_attended
-        # imu_tokens = self.imu_norm(imu_tokens)
+        visual_tokens = visual_tokens + visual_tokens_in
+        
+        # run through MLP
+        visual_tokens_in = visual_tokens
+        visual_tokens = self.visual_norm2(visual_tokens)
+        visual_tokens = self.visual_head(visual_tokens)
+        visual_tokens = visual_tokens + visual_tokens_in
+                
+        # IMU attending to visual (what visual info is relevant for IMU features)
+        imu_tokens, _ = self.imu_to_visual_attn(
+            query=imu_tokens_norm,
+            key=visual_tokens_norm,
+            value=visual_tokens_norm
+        )
+        imu_tokens = imu_tokens + imu_tokens_in
+        
+        # imu MLP
+        imu_tokens_in = imu_tokens
+        imu_tokens = self.imu_norm2(imu_tokens)
+        imu_tokens = self.imu_head(imu_tokens)
+        imu_tokens = imu_tokens + imu_tokens_in
         
         return visual_tokens, imu_tokens
         
-class GloabalPoolFusionStrategy(nn.Module):
+class FusionStrategy(nn.Module):
     # === FUSION STRATEGY ===
     # Current strategy is to globally pool visual and imu tokens along the sequence dimension and concatenate along the embedding dimension
         def __init__(self, embed_dim, dropout):
@@ -363,78 +423,3 @@ class GloabalPoolFusionStrategy(nn.Module):
             fused_tokens = self.fusion_mlp(combined_tokens) # [B, D]
             
             return fused_tokens
-        
-class TaskSpecificFusionStrategy(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout):
-        super().__init__()
-        
-        # learnable queries for each task
-        # self.task_queries = nn.Parameter(torch.randn(3,1, embed_dim))
-        self.translation_query = nn.Parameter(torch.randn(1, 1, embed_dim))
-        self.rotation_query = nn.Parameter(torch.randn(1, 1, embed_dim))
-        
-        # Cross-attention for pooling
-        self.attention = nn.MultiheadAttention(
-            embed_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-        
-        # small refinement mlps per task
-        self.task_mlp = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(embed_dim // 2, embed_dim)
-        )
-        self.translation_mlp = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(embed_dim // 2, embed_dim) 
-        )
-        # small refinement mlps per task
-        self.rotation_mlp = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(embed_dim // 2, embed_dim)
-        )
-
-
-    def forward(self, visual_tokens,  imu_tokens):
-        B = visual_tokens.shape[0]
-        
-        # concatenate all tokens
-        all_tokens = torch.cat([visual_tokens, imu_tokens], dim=1)
-        # generate features for each task
-        # queries = self.task_queries.expand(-1, B, -1).transpose(0, 1) # [B, 3, D]
-        
-        # task_features, _ = self.attention(
-        #     queries,
-        #     all_tokens,
-        #     all_tokens
-        # )
-        # task_features = self.task_mlp(task_features)
-        # trans_feat = task_features[:,0]
-        # rot_feat = task_features[:,1]
-        # yaw_feat = task_features[:,2]
-        # translation
-        trans_feat, trans_attn = self.attention(
-            self.translation_query.expand(B, -1, -1),
-            all_tokens,
-            all_tokens
-        )
-        trans_feat = trans_feat.squeeze(1)
-        trans_feat = self.translation_mlp(trans_feat)
-        # rotation
-        rot_feat, rot_attn = self.attention(
-            self.rotation_query.expand(B, -1, -1),
-            all_tokens,
-            all_tokens
-        )
-        rot_feat = rot_feat.squeeze(1)
-        rot_feat = self.rotation_mlp(rot_feat)
-
-        return trans_feat, rot_feat

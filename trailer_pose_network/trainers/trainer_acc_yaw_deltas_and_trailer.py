@@ -71,6 +71,7 @@ class Trainer():
                        scheduler=None,
                        run_val:bool=False,
                        overfit_detector:bool=False,
+                       early_stopping:bool=False,
                        loss_scale=1,
                        loss_save_interval:int=None,
                        device=torch.device('cpu'),
@@ -90,6 +91,11 @@ class Trainer():
         
         self.run_val = run_val
         self.overfit_detector = overfit_detector
+        if self.overfit_detector:
+            self.patience_count = 0 # initialize patience counter
+        self.early_stopping = early_stopping
+        if self.early_stopping:
+            self.early_stopping_patience_count = 0
         self.loss_scale = loss_scale
         self.loss_save_interval = loss_save_interval
         self.device = device
@@ -123,13 +129,15 @@ class Trainer():
         train_total_loss_hist = []
         train_trans_loss_hist = []
         train_rot_loss_hist = []
+        train_hitch_loss_hist = []
         train_acc_yaw_loss_hist = []
         train_epoch_loss_history = []
         rmse_train_history = []
         if self.run_val:
             val_total_loss_hist = []
             val_trans_loss_hist = []
-            val_rot_lost_hist = []
+            val_rot_loss_hist = []
+            val_hitch_loss_hist = []
             val_acc_yaw_loss_hist = []
             val_epoch_loss_history = []
             rmse_val_history = []
@@ -229,6 +237,7 @@ class Trainer():
                 # intialize other variables
                 trans_losses = []
                 rot_losses = []
+                hitch_losses = []
                 for i in range (0,num_deltas):
                     # slice inputs to get indivual intervals 
                     image_input = images[:, i:i+2]
@@ -238,7 +247,9 @@ class Trainer():
                     # slice delta output target
                     target = y[:,:,i]
                     trans_target = target[:,0:2] # [B,2] first two predictions are translations
-                    rot_target = target[:,2:] #  [B,1] last one is rotation
+                    rot_target = target[:,2:3] #  [B,1]  rotation
+                    hitch_target = target[:,3:] # [B,1] hitch
+                    # dhitch_target = target[:,4] # [B,1] delta hitch
                     # call model
                     # model_start_time = time.time()
                     est = self.model(inputs)
@@ -246,17 +257,21 @@ class Trainer():
                     # parse estimates
                     trans_est = est[0].squeeze(dim=2) # [B,2]
                     rot_est = est[1].squeeze(dim=2) # [B,1]
+                    hitch_est = est[2].squeeze(dim=2) # [B,1]
+                    # dhitch_est = est[3].squeeze(dim=2) # [B,1]
                     # accumulate the yaw prediction over sequence length
                     acc_yaw_pred += rot_est
                     acc_yaw_truth += rot_target
                     # calculate delta losses
                     trans_loss = loss_func[0](trans_est, trans_target)
                     rot_loss = loss_func[1](rot_est, rot_target)
+                    hitch_loss = loss_func[2](hitch_est, hitch_target)
                     trans_losses.append(trans_loss)
                     rot_losses.append(rot_loss)
+                    hitch_losses.append(hitch_loss)
                     # Append estimates and truths if using for accuracy checking
                     if self.check_accuracy:
-                        est_tensor =  torch.cat((trans_est, rot_est), dim=1)
+                        est_tensor =  torch.cat((trans_est, rot_est, hitch_est), dim=1)
                         train_est_history.append(est_tensor.detach())
                         train_truth_history.append(target.detach())
                 if self.check_accuracy:
@@ -265,12 +280,13 @@ class Trainer():
                 # take average of deltas over sequence interval
                 avg_trans_loss = torch.stack(trans_losses).mean()
                 avg_rot_loss = torch.stack(rot_losses).mean()
+                avg_hitch_loss = torch.stack(hitch_losses).mean()
                 # compute accumalted yaw loss
-                acc_yaw_loss = loss_func[2](acc_yaw_pred, acc_yaw_truth)
-                total_loss = self.loss_scale[0] * avg_trans_loss + self.loss_scale[1] * avg_rot_loss + self.loss_scale[2] * acc_yaw_loss
+                acc_yaw_loss = loss_func[3](acc_yaw_pred, acc_yaw_truth)
+                total_train_loss = self.loss_scale[0] * avg_trans_loss + self.loss_scale[1] * avg_rot_loss + self.loss_scale[2] * avg_hitch_loss + self.loss_scale[3] * acc_yaw_loss
 
                 # perform backward pass
-                total_loss.backward()
+                total_train_loss.backward()
 
                 # Clip gradient
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -282,13 +298,15 @@ class Trainer():
                 if self.loss_save_interval is None:
                     train_trans_loss_hist.append(avg_trans_loss.detach())
                     train_rot_loss_hist.append(avg_rot_loss.detach())
+                    train_hitch_loss_hist.append(avg_hitch_loss.detach())
                     train_acc_yaw_loss_hist.append(acc_yaw_loss.detach())
-                    train_total_loss_hist.append(total_loss.detach())
+                    train_total_loss_hist.append(total_train_loss.detach())
                 elif self.loss_save_interval is not None and t % self.loss_save_interval == 0:
                     train_trans_loss_hist.append(avg_trans_loss.detach())
                     train_rot_loss_hist.append(avg_rot_loss.detach())
+                    train_hitch_loss_hist.append(avg_hitch_loss.detach())
                     train_acc_yaw_loss_hist.append(acc_yaw_loss.detach())
-                    train_total_loss_hist.append(total_loss.detach())
+                    train_total_loss_hist.append(total_train_loss.detach())
 
                 # step warmup scheduler and regular scheduler given specified order and delays
                 # TODO: Make this more robust. Currently assumes scheduler steps per iteration.
@@ -310,11 +328,11 @@ class Trainer():
                     self.scheduler.step()
                 # training_loop_start_time = time.time()            
             # append per epoch loss history at end of training loop
-            train_epoch_loss_history.append(total_loss.detach())
+            train_epoch_loss_history.append(total_train_loss.detach())
             
             # verbose updates
             if self.verbose is not None:
-                tqdm.write('Epoch %d, train loss = %.4f' % (e+1,total_loss.detach().item()))
+                tqdm.write('Epoch %d, train loss = %.4f' % (e+1,total_train_loss.detach().item()))
             #------------------------END OF TRAINING LOOP--------------------------
                 
             #------------------------VALIDATION LOOP--------------------------
@@ -349,6 +367,7 @@ class Trainer():
                         # intialize other variables
                         trans_losses = []
                         rot_losses = []
+                        hitch_losses = []
                         for i in range (0,num_deltas):
                             # slice inputs to get indivual intervals 
                             image_input = images[:, i:i+2]
@@ -358,23 +377,27 @@ class Trainer():
                             # slice delta output target
                             target = y[:,:,i] # [B,3,1]
                             trans_target = target[:,0:2] # first two predictions are translations
-                            rot_target = target[:,2:] # last one is rotation
+                            rot_target = target[:,2:3] # rotation
+                            hitch_target = target[:,3:] # hitch
                             # call model
                             est = self.model(inputs)
                             # parse estimates
                             trans_est = est[0].squeeze(dim=2)
                             rot_est = est[1].squeeze(dim=2)
+                            hitch_est = est[2].squeeze(dim=2)
                             # accumulate the yaw prediction over sequence length
                             acc_yaw_pred += rot_est
                             acc_yaw_truth += rot_target
                             # calculate delta losses
                             trans_loss = loss_func[0](trans_est, trans_target)
                             rot_loss = loss_func[1](rot_est, rot_target)
+                            hitch_loss = loss_func[2](hitch_est, hitch_target)
                             trans_losses.append(trans_loss)
                             rot_losses.append(rot_loss)
+                            hitch_losses.append(hitch_loss)
                             # Append estimates and truths if using for accuracy checking
                             if self.check_accuracy:
-                                est_tensor =  torch.cat((trans_est, rot_est), dim=1)
+                                est_tensor =  torch.cat((trans_est, rot_est, hitch_est), dim=1)
                                 val_est_history.append(est_tensor.detach())
                                 val_truth_history.append(target.detach())
                         if self.check_accuracy:
@@ -383,57 +406,70 @@ class Trainer():
                         # take average of deltas over sequence interval
                         avg_trans_loss = torch.stack(trans_losses).mean()
                         avg_rot_loss = torch.stack(rot_losses).mean()
+                        avg_hitch_loss = torch.stack(hitch_losses).mean()
                         # compute accumalted yaw loss
-                        acc_yaw_loss = loss_func[2](acc_yaw_pred, acc_yaw_truth)
-                        total_loss = self.loss_scale[0] * avg_trans_loss + self.loss_scale[1] * avg_rot_loss + self.loss_scale[2] * acc_yaw_loss
+                        acc_yaw_loss = loss_func[3](acc_yaw_pred, acc_yaw_truth)
+                        total_val_loss = self.loss_scale[0] * avg_trans_loss + self.loss_scale[1] * avg_rot_loss + self.loss_scale[2] * avg_hitch_loss + self.loss_scale[3] * acc_yaw_loss
                         
                         # log loss to history (if save interval not given then all losses are saved which can be expensive)
                         if self.loss_save_interval is None:
                             val_trans_loss_hist.append(avg_trans_loss.detach())
-                            val_rot_lost_hist.append(avg_rot_loss.detach())
+                            val_rot_loss_hist.append(avg_rot_loss.detach())
+                            val_hitch_loss_hist.append(avg_hitch_loss.detach())
                             val_acc_yaw_loss_hist.append(acc_yaw_loss.detach())
-                            val_total_loss_hist.append(total_loss.detach())
+                            val_total_loss_hist.append(total_val_loss.detach())
                         elif self.loss_save_interval is not None and t % self.loss_save_interval == 0:
                             val_trans_loss_hist.append(avg_trans_loss.detach())
-                            val_rot_lost_hist.append(avg_rot_loss.detach())
+                            val_rot_loss_hist.append(avg_rot_loss.detach())
+                            val_hitch_loss_hist.append(avg_hitch_loss.detach())
                             val_acc_yaw_loss_hist.append(acc_yaw_loss.detach())
-                            val_total_loss_hist.append(total_loss.detach())
+                            val_total_loss_hist.append(total_val_loss.detach())
 
                     # append loss history per epoch
-                    val_epoch_loss_history.append(total_loss.detach())
+                    val_epoch_loss_history.append(total_val_loss.detach())
             
                 # verbose updates
                 if self.verbose is not None:
-                    tqdm.write('Epoch %d, val loss = %.4f' % (e+1,total_loss.detach().item()))
+                    tqdm.write('Epoch %d, val loss = %.4f' % (e+1,total_val_loss.detach().item()))
             #------------------------------ END OF VAL LOOP --------------------------
             
             
             #--------------- GET ACCURACIES, EARLY STOPPING, OVERFIT DETECTOR, AND SAVE WEIGHTS ---------------
             if self.check_accuracy:
                 rmse_train_deltas = checkAccuracy(train_est_history, train_truth_history)
-                # convert delta yaw pred to degrees (NOTE: Hacky)
-                rmse_train_deltas[2] = np.rad2deg(rmse_train_deltas[2])
+                # convert delta yaw and hitch pred to degrees (NOTE: Hacky)
+                rmse_train_deltas[2:] = np.rad2deg(rmse_train_deltas[2:])
                 rmse_train_acc_yaw = checkAccuracy(train_acc_yaw_est_hist, train_acc_yaw_truth_hist)
                 rmse_train_acc_yaw = np.rad2deg(rmse_train_acc_yaw)
                 rmse_train = np.hstack((rmse_train_deltas, rmse_train_acc_yaw))
-                tqdm.write(f"Training RMSE: {rmse_train}")
+                tqdm.write(f"Training RMSE: dx (m):{rmse_train[0]}, dy (m):{rmse_train[1]}, dyaw (deg):{rmse_train[2]}, hitch (deg):{rmse_train[3]}, Acc yaw (deg):{rmse_train[4]}")
                 rmse_train_history.append(rmse_train)
                 if self.run_val:
                     rmse_val_deltas = checkAccuracy(val_est_history, val_truth_history)
                     # convert delta yaw pred to degrees (NOTE: Hacky)
-                    rmse_val_deltas[2] = np.rad2deg(rmse_val_deltas[2]) # change delta y from rad to degs
+                    rmse_val_deltas[2:] = np.rad2deg(rmse_val_deltas[2:]) # change delta y from rad to degs
                     rmse_val_acc_yaw = checkAccuracy(val_acc_yaw_est_hist, val_acc_yaw_truth_hist)
                     rmse_val_acc_yaw = np.rad2deg(rmse_val_acc_yaw)
                     rmse_val = np.hstack((rmse_val_deltas, rmse_val_acc_yaw))
-                    tqdm.write(f"Validation RMSE: {rmse_val}")
+                    tqdm.write(f"Validation RMSE: dx (m):{rmse_val[0]}, dy (m):{rmse_val[1]}, dyaw (deg):{rmse_val[2]}, hitch (deg):{rmse_val[3]}, Acc yaw (deg):{rmse_val[4]}")
                     rmse_val_history.append(rmse_val)
             
                 # Overfit detector
                 # TODO: Make configurable and more robust
                 if self.overfit_detector:
-                    if np.linalg.norm(rmse_val) > np.linalg.norm(rmse_train) * 1.5:
-                        tqdm.write("Overfitting detected. Terminating Training")
-                        break
+                    if e > 5: # only start after 5 epochs in case unstable initial training
+                        if np.linalg.norm(rmse_val) > np.linalg.norm(rmse_train) * 2.0:
+                        # if total_val_loss > total_train_loss * 2.0:
+                            self.patience_count += 1
+                            tqdm.write(f"Overfitting detected. Patience counter is {self.patience_count}. Will not save weights unless patience counter is reset.")
+                        else:
+                            if self.patience_count > 0:
+                                tqdm.write("Overfitting no longer detected. Resetting patience counter.")
+                            self.patience_count = 0
+                        if self.patience_count >= 10: # 10 straight epochs of detected overfitting warrants early stopping
+                            tqdm.write("Overfitting detected. Terminating Training!")
+                            break
+                    
                 
             # Save weights based on best validation RMSE
             if self.save_weights is not None:
@@ -443,17 +479,29 @@ class Trainer():
                     torch.save(self.model.state_dict(), self.save_weights)
                     tqdm.write("Weights saved to: %s" % self.save_weights)
                 else:
-                    if np.linalg.norm(rmse_val) < np.linalg.norm(best_val_rmse):
-                        best_val_rmse = rmse_val
-                        tqdm.write("Checkpoint reached, saving weights ...")
-                        torch.save(self.model.state_dict(), self.save_weights)
-                        tqdm.write("Weights saved to: %s" % self.save_weights)
-            
-            # TODO: Add early stopping logic
-            
+                    if self.patience_count == 0: # Only save weights if overfitting is not detected
+                        if np.linalg.norm(rmse_val) < np.linalg.norm(best_val_rmse):
+                            best_val_rmse = rmse_val
+                            tqdm.write("Checkpoint reached, saving weights ...")
+                            torch.save(self.model.state_dict(), self.save_weights)
+                            tqdm.write("Weights saved to: %s" % self.save_weights)
+                            
+                            # reset early stopping patience counter
+                            if self.early_stopping:
+                                self.early_stopping_patience_count = 0
+                        else: # if we're not saving off weights then increment early stopping counter
+                            if self.early_stopping:
+                                self.early_stopping_patience_count += 1
+                            
+            # Early stopping if improvements plateau
+            if self.early_stopping:
+                if self.early_stopping_patience_count >= 15: # after 15 epochs of no improvement, terminate training
+                    tqdm.write(f"No improvement detected for {self.early_stopping_patience_count} epochs. Terminating Training!")
+                    break
+                
             # -------------------- CLEAN EPOCH ------------------------
             # Delete variables for memory management
-            del trans_loss, rot_loss, total_loss, acc_yaw_loss, est, trans_est, rot_est, acc_yaw_pred,
+            del trans_loss, rot_loss, total_train_loss, total_val_loss, acc_yaw_loss, est, trans_est, rot_est, acc_yaw_pred,
             if self.check_accuracy:
                 del  rmse_train
                 if self.run_val:
@@ -470,13 +518,15 @@ class Trainer():
         train_epoch_loss_history = torch.stack(train_epoch_loss_history).cpu().numpy() if epochs>1 else train_epoch_loss_history[0].item()
         train_trans_loss_hist = torch.stack(train_trans_loss_hist).cpu().numpy()
         train_rot_loss_hist = torch.stack(train_rot_loss_hist).cpu().numpy()
+        train_hitch_loss_hist = torch.stack(train_hitch_loss_hist).cpu().numpy()
         train_acc_yaw_loss_hist = torch.stack(train_acc_yaw_loss_hist).cpu().numpy()
         
         if self.run_val:
             val_total_loss_hist = torch.stack(val_total_loss_hist).cpu().numpy()
             val_epoch_loss_history = torch.stack(val_epoch_loss_history).cpu().numpy() if epochs>1 else val_epoch_loss_history[0].item()
             val_trans_loss_hist = torch.stack(val_trans_loss_hist).cpu().numpy()
-            val_rot_lost_hist = torch.stack(val_rot_lost_hist).cpu().numpy()
+            val_rot_loss_hist = torch.stack(val_rot_loss_hist).cpu().numpy()
+            val_hitch_loss_hist = torch.stack(val_hitch_loss_hist).cpu().numpy()
             val_acc_yaw_loss_hist = torch.stack(val_acc_yaw_loss_hist).cpu().numpy()
         
         if self.check_gradients:
@@ -487,6 +537,7 @@ class Trainer():
                 "train_total_loss_hist": train_total_loss_hist,
                 "train_trans_loss_hist": train_trans_loss_hist,
                 "train_rot_loss_hist": train_rot_loss_hist,
+                "train_hitch_loss_hist": train_hitch_loss_hist,
                 "train_acc_yaw_loss_hist": train_acc_yaw_loss_hist,
                 "train_epoch_loss_history": train_epoch_loss_history,
             }
@@ -495,7 +546,8 @@ class Trainer():
         if self.run_val:
             outs["val_total_loss_hist"] = val_total_loss_hist
             outs["val_trans_loss_hist"] = val_trans_loss_hist
-            outs["val_rot_lost_hist"] = val_rot_lost_hist
+            outs["val_rot_loss_hist"] = val_rot_loss_hist
+            outs["val_hitch_loss_hist"] = val_hitch_loss_hist
             outs["val_acc_yaw_loss_hist"] = val_acc_yaw_loss_hist
             outs["val_epoch_loss_history"] = val_epoch_loss_history
             if self.check_accuracy:
@@ -507,7 +559,7 @@ class Trainer():
         if self.save_outs is not None:    
             # df = pd.DataFrame(outs)
             df = pd.DataFrame(dict([(k,pd.Series(v)) for k,v in outs.items()]))
-            df.to_csv(self.save_outs["save_path"])
+            df.to_csv(self.save_outs)
             print("Training outs saved to: %s" % self.save_outs)
 
         return self.model, outs

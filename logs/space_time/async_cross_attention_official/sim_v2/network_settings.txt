@@ -1,0 +1,65 @@
+Weights saved to: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\simulation\async_space_time_official\sim_v2.pth
+Outputs = [dx, dy, dyaw]
+RMSEs at final checkpoint (29 of 30):
+Training RMSE: [0.01722276 0.00958616 0.03767857]
+Validation RMSE: [0.03568929 0.00964614 0.09283319]
+
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\simulation\\10Hz\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
+
+SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
+SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time_official"
+WEIGHT_FILE = "sim_v2.pth"
+WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+
+SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_cross_attention_official\\sim_v2\\training_log.csv"
+
+PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
+PRETRAINED = False
+
+# === DATALOADER PARAMETERS ===
+SEQ_LOOKBACK = 2
+IMG_SIZE = (224,224)
+BATCH_SIZE = 6
+VAL_RATIO = 0.2
+NUM_WORKERS = 4
+PREPROCESS_DATA = None
+reduce = None
+
+# === MODEL PARAMETERS ===
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 8
+DEPTH = 8
+PATCH_SIZE = 16
+IN_CHANNELS = 3
+IMU_CHANNELS = 8
+DROPOUT = 0.
+NUM_OUTPUTS = 3
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 30
+LR = 3e-5
+LOSS_SCALE = [1e0, 3e2]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
+# LOSS_SCALE = 1e1
+# LOSS_FUNC = nn.L1Loss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = False
+CHECK_ACCURACY = True
+CHECK_GRADIENTS = False
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
+warmup_period = len(loader_train) * WARMUP_PERIOD
+warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Not as good as original w/ warm restarts. Not bad though ...

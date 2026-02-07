@@ -18,7 +18,8 @@ class AsyncTemporalDataLoader(Dataset):
                  reduce:dict={"target_column":None, "target_size":None},
                  single_test:bool = False,
                  transform_img = None,
-                 transform_data:bool = False,
+                 get_data_stats:bool = False,
+                 preprocess_data:dict | None = None,
                 ):
         self.sequence_root_processed = sequence_root_processed
         self.sequence_root_raw = sequence_root_raw
@@ -27,7 +28,8 @@ class AsyncTemporalDataLoader(Dataset):
         self.reduce = reduce
         self.single_test = single_test
         self.transform_img = transform_img
-        self.transform_data = transform_data
+        self.get_data_stats = get_data_stats
+        self.preprocess_data = preprocess_data
 
         # assert valid input keys
         for input in inputs.keys():
@@ -60,7 +62,33 @@ class AsyncTemporalDataLoader(Dataset):
         # Get raw list to save off for get item
         self.sequence_list_raw = self.getSequences(self.sequence_root_raw)
         
-        
+        if get_data_stats:
+            df_raw_unified = pd.concat(self.sequence_list_raw, ignore_index=True)
+            print(f'MEANS: mean_steer_ang: {np.mean(df_raw_unified["steer_ang"])}, mean_vx: {np.mean(df_raw_unified["vx"])}, mean_imu_accel_x: {np.mean(df_raw_unified["imu_accel_x"])}, mean_imu_accel_y: {np.mean(df_raw_unified["imu_accel_y"])}, mean_imu_accel_z: {np.mean(df_raw_unified["imu_accel_z"])}, mean_imu_gyro_x: {np.mean(df_raw_unified["imu_gyro_x"])}, mean_imu_gyro_y: {np.mean(df_raw_unified["imu_gyro_y"])}, mean_imu_gyro_z: {np.mean(df_raw_unified["imu_gyro_z"])}')
+            print()
+            print(f'STDs: std_steer_ang: {np.std(df_raw_unified["steer_ang"])}, std_vx: {np.std(df_raw_unified["vx"])}, std_imu_accel_x: {np.std(df_raw_unified["imu_accel_x"])}, std_imu_accel_y: {np.std(df_raw_unified["imu_accel_y"])}, std_imu_accel_z: {np.std(df_raw_unified["imu_accel_z"])}, std_imu_gyro_x: {np.std(df_raw_unified["imu_gyro_x"])}, std_imu_gyro_y: {np.std(df_raw_unified["imu_gyro_y"])}, std_imu_gyro_z: {np.std(df_raw_unified["imu_gyro_z"])}')
+                        
+        if preprocess_data is not None:
+            # generate unified raw df to take mean & STD across entire training set
+            df_raw_unified = pd.concat(self.sequence_list_raw, ignore_index=True)
+            vx_min = 0
+            vx_max = 35
+            # apply preprocessing
+            df_raw_unified["steer_ang"] = pd.Series((df_raw_unified["steer_ang"] - preprocess_data["mean_steer_ang"]) / preprocess_data["std_steer_ang"])
+            df_raw_unified["vx"] = pd.Series((df_raw_unified["vx"] - preprocess_data["mean_vx"]) / preprocess_data["std_vx"])
+            # df_raw_unified["vx"] = pd.Series((df_raw_unified["vx"] - vx_min) / (vx_max - vx_min)) # min max normalization
+            df_raw_unified["imu_accel_x"] = pd.Series((df_raw_unified["imu_accel_x"] - preprocess_data["mean_imu_accel_x"]) / preprocess_data["std_imu_accel_x"])
+            df_raw_unified["imu_accel_y"] = pd.Series((df_raw_unified["imu_accel_y"] - preprocess_data["mean_imu_accel_y"]) / preprocess_data["std_imu_accel_y"])
+            df_raw_unified["imu_accel_z"] = pd.Series((df_raw_unified["imu_accel_z"] - preprocess_data["mean_imu_accel_z"]) / preprocess_data["std_imu_accel_z"])
+            df_raw_unified["imu_gyro_x"] = pd.Series((df_raw_unified["imu_gyro_x"] - preprocess_data["mean_imu_gyro_x"]) / preprocess_data["std_imu_gyro_x"])
+            df_raw_unified["imu_gyro_y"] = pd.Series((df_raw_unified["imu_gyro_y"] - preprocess_data["mean_imu_gyro_y"]) / preprocess_data["std_imu_gyro_y"])
+            df_raw_unified["imu_gyro_z"] = pd.Series((df_raw_unified["imu_gyro_z"] - preprocess_data["mean_imu_gyro_z"]) / preprocess_data["std_imu_gyro_z"])
+            
+            # split the unified df back into a list of dfs split by the subset
+            self.sequence_list_raw = [group.reset_index(drop=True) 
+                     for _, group in df_raw_unified.groupby('SUBSET', sort=True)]
+            
+                
     def __len__(self):
         return len(self.df)
     
@@ -121,8 +149,8 @@ class AsyncTemporalDataLoader(Dataset):
                             concat_images = list(executor.map(self.transform_img,concat_images))
 
             input_cam = torch.stack(concat_images)
+            # input_cam = torch.randn_like(input_cam)
 
-            # input_cam = torch.randn(2,3,224,448)
             # for image in concat_images:
             #     image = concat_images[0].permute(1,2,0).numpy()
             #     cv2.imshow("test", image)
@@ -148,8 +176,8 @@ class AsyncTemporalDataLoader(Dataset):
             # inject artifical noise so we don't train on pure truth
             # TODO: Make this option configurable (differs from testing and training)
             # noisy_yaw_hist = self.inject_noise_to_yaw_hist(yaw_hist, [0.00876, 0.0349], 0.8) # std is approx between [0.5 and 2] deg
-            input_yaw_hist = torch.cat([torch.sin(yaw_hist), torch.cos(yaw_hist)], dim=1) # use sin and cos of yaw for observability
-        
+            # input_yaw_hist = torch.cat([torch.sin(yaw_hist), torch.cos(yaw_hist)], dim=1) # use sin and cos of yaw for observability
+            input_yaw_hist = yaw_hist
         
         # generate list of inputs
         inputs = []
@@ -246,23 +274,28 @@ class AsyncTemporalDataLoader(Dataset):
             dx_body_ = []
             dy_body_ = []
             dyaw_ = []
+            dhitch_ = []
             seq_block_10hz = seq_block.iloc[::4].reset_index(drop=True) # take every 4th step since time is perfect
             for i in range(1, len(seq_block_10hz)):
                 pose1 = (seq_block_10hz["X"].iloc[i-1], seq_block_10hz["Y"].iloc[i-1], seq_block_10hz["yaw"].iloc[i-1])
                 pose2 = (seq_block_10hz["X"].iloc[i], seq_block_10hz["Y"].iloc[i], seq_block_10hz["yaw"].iloc[i])
                 dx_body, dy_body, dyaw = self.tangent_to_body_frame_translation(pose1, pose2)
+                dhitch = seq_block_10hz["hitch"].iloc[i] - seq_block_10hz["hitch"].iloc[i-1]
                 dx_body_.append(dx_body)
                 dy_body_.append(dy_body)
                 dyaw_.append(dyaw)
-            # yaw = seq_block_10hz["yaw"].iloc[1:] # grab all but the first since it's our target (1st is used to initialize)
+                dhitch_.append(dhitch)
+            yaw = seq_block_10hz["yaw"].iloc[1:] # grab all but the first since it's our target (1st is used to initialize)
+            hitch = seq_block_10hz["hitch"].iloc[1:].to_list()
+            
             # sin_yaw = np.sin(yaw).tolist()
             # cos_yaw = np.cos(yaw).tolist()
             # outputs = [dx_body_, dy_body_, dyaw_, yaw.to_list()]
             # outputs = [dx_body_, dy_body_, dyaw_, sin_yaw, cos_yaw]
+            # outputs = [dx_body_, dy_body_, dyaw_, hitch] # TODO: Must update trainer to incorporate trailer states
             outputs = [dx_body_, dy_body_, dyaw_]
-
             # outputs = [dx_body, dy_body, dyaw]
-            outputs = torch.as_tensor(outputs)
+            outputs = torch.as_tensor(outputs).squeeze()
             # outputs = outputs.unsqueeze(dim=1)
             return outputs
         

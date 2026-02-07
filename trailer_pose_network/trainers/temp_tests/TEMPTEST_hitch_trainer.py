@@ -64,11 +64,15 @@ class Trainer():
             Path to save training statistics (train/val RMSE, loss, learning rate). Default is None.
     '''
     def __init__(self, model,
+                       hitch_model,
                        optimizer,
+                       hitch_optimizer,
                        loader_train,
                        loader_val,
                        warmup_scheduler=None,
+                       hitch_warmup_scheduler=None,
                        scheduler=None,
+                       hitch_scheduler=None,
                        run_val:bool=False,
                        overfit_detector:bool=False,
                        loss_scale=1,
@@ -78,14 +82,19 @@ class Trainer():
                        check_gradients:bool=False,
                        verbose:int=100,
                        save_weights:str=None,
+                       save_weights_hitch:str=None,
                        save_outs:str=None):
 
         self.model = model
+        self.hitch_model = hitch_model
         self.optimizer = optimizer
+        self.hitch_optimizer = hitch_optimizer
         self.loader_train = loader_train
         self.loader_val = loader_val
         self.scheduler = scheduler
+        self.hitch_scheduler = hitch_scheduler
         self.warmup_scheduler = warmup_scheduler
+        self.hitch_warmup_scheduler = hitch_warmup_scheduler
         self.run_val = run_val
         self.overfit_detector = overfit_detector
         self.loss_scale = loss_scale
@@ -95,6 +104,7 @@ class Trainer():
         self.check_gradients = check_gradients
         self.verbose = verbose
         self.save_weights = save_weights
+        self.save_weights_hitch = save_weights_hitch
         self.save_outs = save_outs
 
         # apply input assertions
@@ -117,10 +127,12 @@ class Trainer():
 
         # initilize histories
         lr_history = []
+        hitch_lr_history = []
         train_loss_history = []
         train_loss1_history = []
         train_loss2_history = []
         train_epoch_loss_history = []
+        train_hitch_loss_history = []
         rmse_train_history = []
         if self.run_val:
             val_loss_history = []
@@ -128,10 +140,11 @@ class Trainer():
             val_loss2_history = []
             val_epoch_loss_history = []
             rmse_val_history = []
-        
+            val_hitch_history = [] # hitch
         initial_loss = None
 
         self.model = self.model.to(device=self.device)
+        self.hitch_model = self.hitch_model.to(device=self.device)
         
         # Set up hooks if prompted
         if self.check_gradients:
@@ -167,18 +180,12 @@ class Trainer():
                     break_outer = True
                     break
                 self.model.train()
-                # NOTE: x are the images
-                #       y are the estimates
-                if isinstance(x,list):
-                    if len(x) == 2:
-                        x[0] = x[0].to(device=self.device, dtype=torch.float32)
-                        x[1] = x[1].to(device=self.device, dtype=torch.float32)
-                    else:
-                        x = x[0] # grab first TODO: Modify this to be more interactive. Make num_inputs a parameter
-                        x = x.to(device=self.device, dtype=torch.float32)
-                else:
-                    x = x.to(device=self.device, dtype=torch.float32)
-
+                self.hitch_model.train()
+                
+                x[0] = x[0].to(device=self.device, dtype=torch.float32)
+                x[1] = x[1].to(device=self.device, dtype=torch.float32)
+                latest_image = x[0][:,-1].detach().clone()
+                
                 y = y.to(device=self.device, dtype=torch.float32)
 
                 # clear grads
@@ -187,25 +194,30 @@ class Trainer():
                 
                 # zero out all gradients for the variables which the optimizer will update
                 self.optimizer.zero_grad()
+                self.hitch_optimizer.zero_grad()
                 
                 # call model to estimate
                 est = self.model(x)
-                if isinstance(est, torchvision.models.inception.InceptionOutputs):
-                    est = est[0]
-                # est = est.squeeze()
-                # est.requires_grad_()
+                hitch_est = self.hitch_model(latest_image)
 
                 # get learning rate
                 lr = getLR(optimizer=self.optimizer)
                 lr_history.append(lr)
 
+                hitch_lr = getLR(optimizer=self.hitch_optimizer)
+                hitch_lr_history.append(hitch_lr)
+                
                 # loss1 = loss_func[0](est[:,0:2], y[:,0:2])
                 loss1 = loss_func[0](est[0], y[:,0:2])
                 loss1 = self.loss_scale[0] * loss1
                 
                 # loss2 = loss_func[1](est[:,2:], y[:,2:])
-                loss2 = loss_func[1](est[1], y[:,2:])
+                loss2 = loss_func[1](est[1], y[:,2:3])
                 loss2 = self.loss_scale[1] * loss2
+                
+                # hitch loss
+                loss3 = loss_func[2](hitch_est, y[:,3:])
+                loss3 = self.loss_scale[2] * loss3
                 
                 loss = loss1 + loss2
                 # loss = loss_func(est,y)
@@ -213,21 +225,25 @@ class Trainer():
                 
                 # perform backward pass
                 loss.backward()
+                loss3.backward()
                 
                 # Clip gradient
                 # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 
                 # update the model using the computed gradients
                 self.optimizer.step()
+                self.hitch_optimizer.step()
                 
                 # log loss to history (if save interval not given then all losses are saved which can be expensive)
                 if self.loss_save_interval is None:
                     train_loss1_history.append(loss1.detach())
                     train_loss2_history.append(loss2.detach())
+                    train_hitch_loss_history.append(loss3.detach())
                     train_loss_history.append(loss.detach())
                 elif self.loss_save_interval is not None and t % self.loss_save_interval == 0:
                     train_loss1_history.append(loss1.detach())
                     train_loss2_history.append(loss2.detach())
+                    train_hitch_loss_history.append(loss3.detach())
                     train_loss_history.append(loss.detach())
 
                 # step warmup scheduler and regular scheduler given specified order and delays
@@ -248,10 +264,25 @@ class Trainer():
                 # only scheduler is given
                 elif self.warmup_scheduler is None and self.scheduler is not None:
                     self.scheduler.step()
+                
+                # WARMUP AND SCHEDULER FOR HITCH TRAINING
+                if self.hitch_warmup_scheduler is not None and self.hitch_scheduler is not None:
+                    # default is to delay the learning rate scheduler by the warmup period
+                    warmup_period = self.hitch_warmup_scheduler.warmup_params[0]['warmup_period']
+                    with self.hitch_warmup_scheduler.dampening():
+                        if self.hitch_warmup_scheduler.last_step + 1 >= warmup_period:
+                            self.hitch_scheduler.step()
+                # only warmup is given
+                elif self.hitch_warmup_scheduler is not None and self.hitch_scheduler is None:
+                    with self.hitch_warmup_scheduler.dampening():
+                        pass
+                # only scheduler is given
+                elif self.hitch_warmup_scheduler is None and self.hitch_scheduler is not None:
+                    self.hitch_scheduler.step()
                     
                 # Append estimates and truths if using for accuracy checking
                 if self.check_accuracy:
-                    est =  torch.cat((est[0], est[1]), dim=1)
+                    est =  torch.cat((est[0], est[1], hitch_est), dim=1)
                     train_est_history.append(est.detach())
                     train_truth_history.append(y.detach())  
                     
@@ -273,34 +304,30 @@ class Trainer():
                             print('"esc" detected. Exiting training.')
                             break_outer = True
                             break
-                        # NOTE: x are the images
-                        #       y are the estimates
-                        if isinstance(x,list):
-                            if len(x) == 2:
-                                x[0] = x[0].to(device=self.device, dtype=torch.float32)
-                                x[1] = x[1].to(device=self.device, dtype=torch.float32)
-                            else:
-                                x = x[0] # grab first TODO: Modify this to be more interactive. Make num_inputs a parameter
-                                x = x.to(device=self.device, dtype=torch.float32)
-                        else:
-                            x = x.to(device=self.device, dtype=torch.float32)
-
+                        x[0] = x[0].to(device=self.device, dtype=torch.float32)
+                        x[1] = x[1].to(device=self.device, dtype=torch.float32)
+                        latest_image = x[0][:,-1].detach().clone()
+                        
                         y = y.to(device=self.device, dtype=torch.float32)
 
                         # call model to estimate
                         est = self.model(x)
-                        if isinstance(est, torchvision.models.inception.InceptionOutputs):
-                            est = est[0]
-                            
+                        hitch_est = self.hitch_model(latest_image)
+                         
                         # loss1 = loss_func[0](est[:,0:2], y[:,0:2])
                         loss1 = loss_func[0](est[0], y[:,0:2])
                         loss1 = self.loss_scale[0] * loss1
                         
                         # loss2 = loss_func[1](est[:,2:], y[:,2:])
-                        loss2 = loss_func[1](est[1], y[:,2:])
+                        loss2 = loss_func[1](est[1], y[:,2:3])
                         loss2 = self.loss_scale[1] * loss2
                         
+                        # hitch loss
+                        loss3 = loss_func[2](hitch_est, y[:,3:])
+                        loss3 = self.loss_scale[2] * loss3
+                        
                         loss = loss1 + loss2
+                    
                         # loss = loss_func(est,y)
                         # loss = self.loss_scale * loss
                         
@@ -308,15 +335,17 @@ class Trainer():
                         if self.loss_save_interval is None:
                             val_loss1_history.append(loss1.detach())
                             val_loss2_history.append(loss2.detach())
+                            val_hitch_history.append(loss3.detach())
                             val_loss_history.append(loss.detach())
                         elif self.loss_save_interval is not None and t % self.loss_save_interval == 0:
                             val_loss1_history.append(loss1.detach())
                             val_loss2_history.append(loss2.detach())
+                            val_hitch_history.append(loss3.detect())
                             val_loss_history.append(loss.detach())
 
                         # check the training and validation accuracies at the end of every epoch
                         if self.check_accuracy:
-                            est =  torch.cat((est[0], est[1]), dim=1)
+                            est =  torch.cat((est[0], est[1], hitch_est), dim=1)
                             val_est_history.append(est)
                             val_truth_history.append(y)
                             
@@ -349,22 +378,30 @@ class Trainer():
             # Save weights based on best validation RMSE
             if self.save_weights is not None:
                 if e == 0: # initialize best rmse to first rmse
-                    best_val_rmse = rmse_val
+                    best_val_rmse = rmse_val[0:3] # VIO rmse
+                    best_hitch_val_rmse = rmse_val[-1] # hitch rmse
                     tqdm.write("Checkpoint reached, saving weights ...")
                     torch.save(self.model.state_dict(), self.save_weights)
-                    tqdm.write("Weights saved to: %s" % self.save_weights)
+                    torch.save(self.hitch_model.state_dict(), self.save_weights_hitch)
+                    tqdm.write("VIO Weights saved to: %s" % self.save_weights)
+                    tqdm.write("Hitch Weights saved to: %s" % self.save_weights_hitch)
                 else:
-                    if np.linalg.norm(rmse_val) < np.linalg.norm(best_val_rmse):
-                        best_val_rmse = rmse_val
-                        tqdm.write("Checkpoint reached, saving weights ...")
+                    if np.linalg.norm(rmse_val[0:3]) < np.linalg.norm(best_val_rmse): # VIO
+                        best_val_rmse = rmse_val[0:3]
+                        tqdm.write("VIO checkpoint reached, saving weights ...")
                         torch.save(self.model.state_dict(), self.save_weights)
-                        tqdm.write("Weights saved to: %s" % self.save_weights)
-            
+                        tqdm.write("VIO Weights saved to: %s" % self.save_weights)
+                    if np.linalg.norm(rmse_val[-1]) < np.linalg.norm(best_hitch_val_rmse): # VIO
+                        best_hitch_val_rmse = rmse_val[-1]
+                        tqdm.write("Hitch checkpoint reached, saving weights ...")
+                        torch.save(self.hitch_model.state_dict(), self.save_weights_hitch)
+                        tqdm.write("Hitch Weights saved to: %s" % self.save_weights_hitch)
+                        
             # TODO: Add early stopping logic
             
             # -------------------- CLEAN EPOCH ------------------------
             # Delete variables for memory management
-            del loss, loss1, loss2, est
+            del loss, loss1, loss2, loss3, est
             if self.check_accuracy:
                 del  rmse_train
                 if self.run_val:
@@ -380,21 +417,25 @@ class Trainer():
         train_epoch_loss_history = torch.stack(train_epoch_loss_history).cpu().numpy() if epochs>1 else train_epoch_loss_history[0].item()
         train_loss1_history = torch.stack(train_loss1_history).cpu().numpy()
         train_loss2_history = torch.stack(train_loss2_history).cpu().numpy()
+        train_hitch_loss_history = torch.stack(train_hitch_loss_history).cpu().numpy()
 
         if self.run_val:
             val_loss_history = torch.stack(val_loss_history).cpu().numpy()
             val_epoch_loss_history = torch.stack(val_epoch_loss_history).cpu().numpy() if epochs>1 else val_epoch_loss_history[0].item()
             val_loss1_history = torch.stack(val_loss1_history).cpu().numpy()
             val_loss2_history = torch.stack(val_loss2_history).cpu().numpy()
-        
+            val_hitch_history = torch.stack(val_hitch_history).cpu().numpy()
+            
         if self.check_gradients:
             layer_idx, avg_grads = get_grads(grads)
             
         # package outs dict for returns
         outs = {"lr_history": lr_history,
+                "hitch_lr_history": hitch_lr_history,
                 "train_loss_history": train_loss_history,
                 "train_loss1_history": train_loss1_history,
                 "train_loss2_history": train_loss2_history,
+                "train_loss3_history": train_hitch_loss_history,
                 "train_epoch_loss_history": train_epoch_loss_history,
             }
         if self.check_accuracy:
@@ -403,6 +444,7 @@ class Trainer():
             outs["val_loss_history"] = val_loss_history
             outs["val_loss1_history"] = val_loss1_history
             outs["val_loss2_history"] = val_loss2_history
+            outs["val_loss3_history"] = val_hitch_history
             outs["val_epoch_loss_history"] = val_epoch_loss_history
             if self.check_accuracy:
                 outs["rmse_val_history"] = rmse_val_history
@@ -413,7 +455,7 @@ class Trainer():
         if self.save_outs is not None:    
             # df = pd.DataFrame(outs)
             df = pd.DataFrame(dict([(k,pd.Series(v)) for k,v in outs.items()]))
-            df.to_csv(self.save_outs)
+            df.to_csv(self.save_outs["save_path"])
             print("Training outs saved to: %s" % self.save_outs)
 
         return self.model, outs
@@ -439,7 +481,7 @@ def checkAccuracy(est_history, truth_history):
     rmse = rmse.cpu().numpy().squeeze()
 
     # convert delta yaw pred to degrees (NOTE: Hacky)
-    rmse[2] = np.rad2deg(rmse[2])
+    rmse[2:] = np.rad2deg(rmse[2:])
 
     # take mean across temporal dim
     # rmse = np.mean(rmse, axis=1)

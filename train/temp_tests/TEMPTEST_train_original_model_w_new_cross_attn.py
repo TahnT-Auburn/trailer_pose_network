@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, random_split
 import pytorch_warmup as warmup
 
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
-from trailer_pose_network.models.spacetime.finalized.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
+from trailer_pose_network.models.temp_tests.TEMPTEST_new_cross_attn import AsyncSpaceTimeCrossAttention
 
 from trailer_pose_network.trainer import Trainer
 
@@ -27,12 +27,10 @@ SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
 SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
 SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time_official"
-WEIGHT_FILE = "sim_v2.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time"
+WEIGHT_FILE = "TEMPTEST_CROSS_ATTN_async_space_time_cross_attn_v1.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
-
-SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_cross_attention_official\\sim_v2\\training_log.csv"
 
 PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
 PRETRAINED = False
@@ -44,25 +42,7 @@ BATCH_SIZE = 6
 VAL_RATIO = 0.2
 NUM_WORKERS = 4
 # NUM_WORKERS = 0
-# PREPROCESS_DATA = { # SIM TRAINING DATA STATISTICS (IMU0)
-#     "mean_steer_ang": 0.00010474232904788316, 
-#     "mean_vx": 18.287964405986905,
-#     "mean_imu_accel_x": -0.08054565556000937, 
-#     "mean_imu_accel_y": 0.059256087349158076, 
-#     "mean_imu_accel_z": -9.820629497778299, 
-#     "mean_imu_gyro_x": -0.0004527679883824836, 
-#     "mean_imu_gyro_y": 1.7486348199251608e-06,
-#     "mean_imu_gyro_z": -0.0007029802208594473,
-#     "std_steer_ang": 0.11945972354652491, 
-#     "std_vx": 9.763229616274344,
-#     "std_imu_accel_x": 0.38069991167038575, 
-#     "std_imu_accel_y": 2.0534440012091593, 
-#     "std_imu_accel_z": 0.26311322761089984, 
-#     "std_imu_gyro_x": 0.007918682043185972, 
-#     "std_imu_gyro_y": 0.002558814472160346, 
-#     "std_imu_gyro_z": 0.16526482988751023
-# }
-PREPROCESS_DATA = None
+
 # === MODEL PARAMETERS ===
 NUM_FRAMES = 2
 NUM_IMU_SAMPLES = 5
@@ -98,13 +78,12 @@ def train():
         sequence_root_raw=SEQ_ROOT_RAW,
         sequential_lookback=SEQ_LOOKBACK,
         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-        # reduce={'target_column':'steer_ang', 'target_size':10},
+        # reduce={'target_column':'steer_ang', 'target_size':500},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToTensor(),
         ]),
-        preprocess_data=PREPROCESS_DATA,
     )
     val_set = AsyncTemporalDataLoader(
         sequence_root_processed=SEQ_ROOT_PROCESSED_VAL,
@@ -117,7 +96,6 @@ def train():
             v2.Resize(IMG_SIZE),
             v2.ToTensor(),
         ]),
-        preprocess_data=PREPROCESS_DATA,
     )
     # num_val = int(np.round(VAL_RATIO * len(full_set)))
     # num_train = len(full_set) - num_val
@@ -150,8 +128,7 @@ def train():
         
     # Set up training
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
     warmup_period = len(loader_train) * WARMUP_PERIOD
     warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
     
@@ -169,8 +146,7 @@ def train():
                               check_accuracy=CHECK_ACCURACY,
                               check_gradients=CHECK_GRADIENTS,
                               verbose=len(loader_train),
-                              save_weights=SAVE_WEIGHTS,
-                              save_outs=SAVE_LOG)
+                              save_weights=SAVE_WEIGHTS)
     
     # Train model
     print('Training ...')

@@ -1,0 +1,73 @@
+Weights saved to: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\simulation\async_st_ca_rn_acc_yaw_trailer\imu_0\async_st_ca_rn_acc_yaw_trailer_imu0_v1.pth
+Outputs = [dx, dy, dyaw, hitch]
+Final RMSEs at checkpoint (19 of 30):
+Training RMSE: dx (m):0.04200791195034981, dy (m):0.016070200130343437, dyaw (deg):0.1682063341140747, hitch (deg):0.6545803546905518, Acc yaw (deg):0.754529595375061
+Validation RMSE: dx (m):0.05392085760831833, dy (m):0.01222817413508892, dyaw (deg):0.11255394667387009, hitch (deg):0.841327965259552, Acc yaw (deg):0.5474210381507874
+
+# === DATALOADER PARAMETERS ===
+SEQ_LOOKBACK = 8
+IMG_SIZE = (224,224)
+BATCH_SIZE = 4
+NUM_WORKERS = 4
+PIN_MEMORY = True
+PREFETCH_FACTOR = 2
+PERSISTANT_WORKERS = True
+PREPROCESS_DATA = { # SIM TRAINING DATA STATISTICS (IMU0)
+    "mean_steer_ang": 0.00010474232904788316, 
+    # "mean_vx": 18.287964405986905,
+    "mean_imu_accel_x": -0.08054565556000937, 
+    "mean_imu_accel_y": 0.059256087349158076, 
+    "mean_imu_accel_z": -9.820629497778299, 
+    "mean_imu_gyro_x": -0.0004527679883824836, 
+    "mean_imu_gyro_y": 1.7486348199251608e-06,
+    "mean_imu_gyro_z": -0.0007029802208594473,
+    "std_steer_ang": 0.11945972354652491, 
+    # "std_vx": 9.763229616274344,
+    "std_imu_accel_x": 0.38069991167038575, 
+    "std_imu_accel_y": 2.0534440012091593, 
+    "std_imu_accel_z": 0.26311322761089984, 
+    "std_imu_gyro_x": 0.007918682043185972, 
+    "std_imu_gyro_y": 0.002558814472160346, 
+    "std_imu_gyro_z": 0.16526482988751023
+}
+reduce={'target_column':'steer_ang', 'target_size':3000},
+
+# === MODEL PARAMETERS ===
+NUM_DELTAS = 1
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 8
+DEPTH = 4
+IMU_CHANNELS = 8
+DROPOUT = 0.1
+MODALITY_DROPOUT = {
+    "imu_dropout_rate": 0.0,
+    "cam_dropout_rate": 0.0
+}
+NUM_OUTPUTS = 5
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 30
+LR = 3e-5
+LOSS_SCALE = [1, 3e2, 1, 3e2]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.005
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = True
+EARLY_STOPPING = True
+CHECK_ACCURACY = True
+CHECK_GRADIENTS = False
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
+warmup_period = len(loader_train) * WARMUP_PERIOD
+warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- The 3e-5 LR seems to work much better than 1e-4. For other sim results that show decent results, that seems to be case as well
+- The issue is training really slows down towards the end hence the best weight being at 19. Maybe eta min for sim should not be 0.0?
+- Vx is still poor and we're not preprocessing it so I think preprocessing is probably fine but not sure.
+- The other non-trailer predicting versions don't perform bad but they are also not preprocessed. Maybe don't preprocess anything. (including images?) and maybe lower seq lookback?

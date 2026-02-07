@@ -7,15 +7,17 @@ import time
 
 import torch
 import torch.nn as nn
+import torchvision
 from torchvision import transforms
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader, random_split
 import pytorch_warmup as warmup
 
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
-from trailer_pose_network.models.spacetime.finalized.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
+from trailer_pose_network.models.temp_tests.TEMPTEST_hitch import AsyncSpaceTimeCrossAttention
+from trailer_pose_network.models.temp_tests.TEMPTEST_hitch import HitchModel
 
-from trailer_pose_network.trainer import Trainer
+from trailer_pose_network.trainers.temp_tests.TEMPTEST_hitch_trainer import Trainer
 
 #%%
 # Set Global variables
@@ -27,12 +29,13 @@ SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
 SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
 SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time_official"
-WEIGHT_FILE = "sim_v2.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time"
+WEIGHT_FILE = "TEMPTEST_HITCH_VIO_async_space_time_cross_attn_v1.pth"
+HITCH_WEIGHT_FILE = "TEMPTEST_HITCH_HITCH_async_space_time_cross_attn_v1.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+HITCH_WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, HITCH_WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
-
-SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_cross_attention_official\\sim_v2\\training_log.csv"
+SAVE_HITCH_WEIGHTS = HITCH_WEIGHT_SAVE_PATH
 
 PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
 PRETRAINED = False
@@ -44,25 +47,7 @@ BATCH_SIZE = 6
 VAL_RATIO = 0.2
 NUM_WORKERS = 4
 # NUM_WORKERS = 0
-# PREPROCESS_DATA = { # SIM TRAINING DATA STATISTICS (IMU0)
-#     "mean_steer_ang": 0.00010474232904788316, 
-#     "mean_vx": 18.287964405986905,
-#     "mean_imu_accel_x": -0.08054565556000937, 
-#     "mean_imu_accel_y": 0.059256087349158076, 
-#     "mean_imu_accel_z": -9.820629497778299, 
-#     "mean_imu_gyro_x": -0.0004527679883824836, 
-#     "mean_imu_gyro_y": 1.7486348199251608e-06,
-#     "mean_imu_gyro_z": -0.0007029802208594473,
-#     "std_steer_ang": 0.11945972354652491, 
-#     "std_vx": 9.763229616274344,
-#     "std_imu_accel_x": 0.38069991167038575, 
-#     "std_imu_accel_y": 2.0534440012091593, 
-#     "std_imu_accel_z": 0.26311322761089984, 
-#     "std_imu_gyro_x": 0.007918682043185972, 
-#     "std_imu_gyro_y": 0.002558814472160346, 
-#     "std_imu_gyro_z": 0.16526482988751023
-# }
-PREPROCESS_DATA = None
+
 # === MODEL PARAMETERS ===
 NUM_FRAMES = 2
 NUM_IMU_SAMPLES = 5
@@ -73,13 +58,14 @@ PATCH_SIZE = 16
 IN_CHANNELS = 3
 IMU_CHANNELS = 8
 DROPOUT = 0.
-NUM_OUTPUTS = 3
+NUM_OUTPUTS = 4
 
 # === TRAINING PARAMETERS ===
 NUM_EPOCHS = 30
 LR = 3e-5
-LOSS_SCALE = [1e0, 3e2]
-LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
+HITCH_LR = 1e-4
+LOSS_SCALE = [1e0, 3e2, 1e2]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
 # LOSS_SCALE = 1e1
 # LOSS_FUNC = nn.L1Loss()
 BETAS = (0.9, 0.999)
@@ -98,13 +84,12 @@ def train():
         sequence_root_raw=SEQ_ROOT_RAW,
         sequential_lookback=SEQ_LOOKBACK,
         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-        # reduce={'target_column':'steer_ang', 'target_size':10},
+        reduce={'target_column':'steer_ang', 'target_size':3000},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToTensor(),
         ]),
-        preprocess_data=PREPROCESS_DATA,
     )
     val_set = AsyncTemporalDataLoader(
         sequence_root_processed=SEQ_ROOT_PROCESSED_VAL,
@@ -117,7 +102,6 @@ def train():
             v2.Resize(IMG_SIZE),
             v2.ToTensor(),
         ]),
-        preprocess_data=PREPROCESS_DATA,
     )
     # num_val = int(np.round(VAL_RATIO * len(full_set)))
     # num_train = len(full_set) - num_val
@@ -128,20 +112,34 @@ def train():
     loader_val = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
     
     # Load model
-    model = AsyncSpaceTimeCrossAttention(IMG_SIZE,
-                                         PATCH_SIZE,
-                                         IN_CHANNELS,
-                                         EMBED_DIM,
-                                         NUM_FRAMES,
-                                         NUM_IMU_SAMPLES,
-                                         IMU_CHANNELS,
-                                         NUM_HEADS,
-                                         DEPTH,
-                                         DROPOUT,
-                                         NUM_OUTPUTS)
+    
+    model = AsyncSpaceTimeCrossAttention(
+        IMG_SIZE,
+        PATCH_SIZE,
+        IN_CHANNELS,
+        EMBED_DIM,
+        NUM_FRAMES,
+        NUM_IMU_SAMPLES,
+        IMU_CHANNELS,
+        NUM_HEADS,
+        DEPTH,
+        DROPOUT,
+        NUM_OUTPUTS
+    )
+    
+    # Load hitch model
+    ENCODER = torchvision.models.mobilenet_v2(weights='IMAGENET1K_V1')
+    hitch_model = HitchModel(
+        ENCODER,
+        EMBED_DIM,
+        DROPOUT,
+    )
+    
+    # Load models to device
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Device is Use: %s' % device)
     model = model.to(device)
+    hitch_model = hitch_model.to(device)
     
     # Load pretrained weights if prompted
     if PRETRAINED:
@@ -150,15 +148,24 @@ def train():
         
     # Set up training
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
     warmup_period = len(loader_train) * WARMUP_PERIOD
     warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
     
+    hitch_optimizer = torch.optim.AdamW(hitch_model.parameters(), lr=HITCH_LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+    hitch_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=hitch_optimizer, T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
+    # hitch_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.1)
+    hitch_warmup_scheduler = warmup.LinearWarmup(optimizer=hitch_optimizer, warmup_period=warmup_period)
+    # hitch_warmup_scheduler = None
+    
     network_trainer = Trainer(model=model,
+                              hitch_model=hitch_model,
                               optimizer=optimizer,
+                              hitch_optimizer=hitch_optimizer,
                               scheduler=scheduler,
+                              hitch_scheduler=hitch_scheduler,
                               warmup_scheduler=warmup_scheduler,
+                              hitch_warmup_scheduler=hitch_warmup_scheduler,
                               loader_train=loader_train,
                               loader_val=loader_val,
                               run_val=RUN_VAL,
@@ -170,7 +177,7 @@ def train():
                               check_gradients=CHECK_GRADIENTS,
                               verbose=len(loader_train),
                               save_weights=SAVE_WEIGHTS,
-                              save_outs=SAVE_LOG)
+                              save_weights_hitch=SAVE_HITCH_WEIGHTS)
     
     # Train model
     print('Training ...')
@@ -227,32 +234,38 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
+    plt.figure()
+    plt.title('Hitch LR')
+    plt.plot(outs["hitch_lr_history"])
+    plt.xlabel('Iterations')
+   
+    plt.figure()
+    plt.subplot(311)
+    plt.plot(outs["train_loss1_history"])
+    plt.xlabel('Iterations')
+    plt.ylabel('Train Loss1 (Trans)')
+    plt.subplot(312)
+    plt.plot(outs["train_loss2_history"])
+    plt.xlabel('Iterations')
+    plt.ylabel('Train Loss2 (Rot)')
+    plt.subplot(313)
+    plt.plot(outs["train_loss3_history"])
+    plt.xlabel('Iterations')
+    plt.ylabel('Hitch Loss')
     if RUN_VAL:
-        plt.subplot(411)
-        plt.plot(outs["train_loss1_history"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss1 (Trans)')
-        plt.subplot(412)
-        plt.plot(outs["train_loss2_history"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss2 (Rot)')
-        plt.subplot(413)
+        plt.figure()
+        plt.subplot(311)
         plt.plot(outs["val_loss1_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss1 (Trans)')
-        plt.subplot(414)
+        plt.subplot(312)
         plt.plot(outs["val_loss2_history"])
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss2 (Rot)')
-    else:
-        plt.subplot(211)
-        plt.plot(outs["train_loss1_history"])
+        plt.subplot(313)
+        plt.plot(outs["val_loss3_history"])
         plt.xlabel('Iterations')
-        plt.ylabel('Train Loss1 (Trans)')
-        plt.subplot(212)
-        plt.plot(outs["train_loss2_history"])
-        plt.xlabel('Iterations')
-        plt.ylabel('Train Loss2 (Rot)')
+        plt.ylabel('Val Loss2 (Rot)')
     plt.tight_layout()
     plt.show()
     

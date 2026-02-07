@@ -1,0 +1,68 @@
+Weights saved to: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\simulation\async_st_ca_rn_acc_yaw_trailer\imu_1\async_st_ca_rn_acc_yaw_trailer_imu1_v1.pth
+Outputs = [dx, dy, dyaw, hitch]
+RMSEs at final checkpoint (Epoch 34 of 20):
+Training RMSE: dx (m):0.0080407178029418, dy (m):0.005834436509758234, dyaw (deg):0.05413264408707619, hitch (deg):0.16296574473381042, Acc yaw (deg):0.2087998390197754
+Validation RMSE: dx (m):0.15133045613765717, dy (m):0.016749592497944832, dyaw (deg):0.1443018615245819, hitch (deg):0.4435303211212158, Acc yaw (deg):0.8814288377761841
+
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\simulation\\10Hz\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed_alt_imu_1\\"
+
+SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
+SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed_alt_imu_1\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_st_ca_rn_acc_yaw_trailer\\imu_1\\"
+WEIGHT_FILE = "async_st_ca_rn_acc_yaw_trailer_imu1_v1.pth"
+WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+
+OUT_LOG_PATH = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_st_ca_rn_acc_yaw_trailer\\imu_1\\sim_results1\\train_log.csv"
+
+PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn_acc_yaw\\async_st_ca_rn_acc_yaw_v3.pth"
+PRETRAINED = False
+
+# === DATALOADER PARAMETERS ===
+SEQ_LOOKBACK = 8
+IMG_SIZE = (224,224)
+BATCH_SIZE = 4
+NUM_WORKERS = 4
+PIN_MEMORY = True
+PREFETCH_FACTOR = 2
+PERSISTANT_WORKERS = True
+reduce = None
+
+# === MODEL PARAMETERS ===
+NUM_DELTAS = 1
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 4
+DEPTH = 4
+
+IN_CHANNELS = 3
+IMU_CHANNELS = 8
+DROPOUT = 0.
+NUM_OUTPUTS = 5
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 50
+LR = 1e-4
+LOSS_SCALE = [1, 1, 1, 5]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
+# LOSS_SCALE = 1e1
+# LOSS_FUNC = nn.L1Loss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = False
+CHECK_ACCURACY = True
+CHECK_GRADIENTS = False
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
+warmup_period = len(loader_train) * WARMUP_PERIOD
+warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Training is still overfitting as shown by the final RMSEs. 
+- When using random images, the solution doesn't change for testset. But it does get worst for the training set! What does that mean?

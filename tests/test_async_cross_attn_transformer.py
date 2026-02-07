@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, random_split
 import pytorch_warmup as warmup
 
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
-from trailer_pose_network.models.spacetime.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
+from trailer_pose_network.models.spacetime.finalized.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
 
 from trailer_pose_network.trainer import Trainer
 
@@ -22,25 +22,45 @@ from trailer_pose_network.trainer import Trainer
 # Set Global variables
 
 # === FILE LOADING ===
-SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02\\"
-SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02\\"            
+# SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02\\"
+# SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02\\"            
+SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2_1\\"
+SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF2_1\\" 
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time"
-WEIGHT_FILE = "async_space_time_cross_attn_v3.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time_official"
+WEIGHT_FILE = "sim_v2.pth"
 WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 # === DATALOADER PARAMETERS ===
 NUM_FRAMES = 2
-IMG_SIZE = (224,448)
+IMG_SIZE = (224,224)
 BATCH_SIZE = 6
 NUM_WORKERS = 4
-
+# PREPROCESS_DATA = { # SIM TRAINING DATA STATISTICS (IMU0)
+#     "mean_steer_ang": 0.00010474232904788316, 
+#     "mean_vx": 18.287964405986905,
+#     "mean_imu_accel_x": -0.08054565556000937, 
+#     "mean_imu_accel_y": 0.059256087349158076, 
+#     "mean_imu_accel_z": -9.820629497778299, 
+#     "mean_imu_gyro_x": -0.0004527679883824836, 
+#     "mean_imu_gyro_y": 1.7486348199251608e-06,
+#     "mean_imu_gyro_z": -0.0007029802208594473,
+#     "std_steer_ang": 0.11945972354652491, 
+#     "std_vx": 9.763229616274344,
+#     "std_imu_accel_x": 0.38069991167038575, 
+#     "std_imu_accel_y": 2.0534440012091593, 
+#     "std_imu_accel_z": 0.26311322761089984, 
+#     "std_imu_gyro_x": 0.007918682043185972, 
+#     "std_imu_gyro_y": 0.002558814472160346, 
+#     "std_imu_gyro_z": 0.16526482988751023
+# }
+PREPROCESS_DATA=None
 # === MODEL PARAMETERS ===
 NUM_FRAMES = 2
 NUM_IMU_SAMPLES = 5
 EMBED_DIM = 384
 NUM_HEADS = 8
-DEPTH = 12
+DEPTH = 8
 PATCH_SIZE = 16
 IN_CHANNELS = 3
 IMU_CHANNELS = 8
@@ -61,6 +81,7 @@ def test():
                                             v2.Resize(IMG_SIZE),
                                             v2.ToTensor(),
                                         ]),
+                                        preprocess_data=PREPROCESS_DATA
                                     )
 
     # Generate loaders

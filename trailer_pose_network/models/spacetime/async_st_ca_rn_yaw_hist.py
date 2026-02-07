@@ -24,7 +24,7 @@ class AsyncSpaceTimeCrossAttentionResNetYawHist(nn.Module):
         super().__init__()
         assert img_size[0]*img_size[1] % 8 == 0, \
             f"Input image size ({img_size[0],img_size[1]}) are not compatible with ResNet encoder. W,H must be divisible my 8."
-            
+    
         self.sequential_lookback = seqential_lookback
         self.num_deltas = num_deltas
         self.num_frames = num_frames
@@ -34,10 +34,10 @@ class AsyncSpaceTimeCrossAttentionResNetYawHist(nn.Module):
         
         # === IMAGE RESNET ENCODER ===
         # prepare resnet model with custom head
-        in_feats = resnet_model.fc.in_features
+        re_in_feats = resnet_model.fc.in_features
         # replace resnet classification head with custom head. 
         resnet_model.fc = nn.Sequential(
-            nn.Linear(in_feats, embed_dim),
+            nn.Linear(re_in_feats, embed_dim),
             nn.GELU(),
             nn.Linear(embed_dim, embed_dim * 2),
             nn.GELU(),
@@ -60,7 +60,7 @@ class AsyncSpaceTimeCrossAttentionResNetYawHist(nn.Module):
         )
         
         # === YAW HISTORY EMBEDDING ===
-        self.yaw_hist_embed = nn.Linear(2, embed_dim)
+        self.yaw_hist_embed = nn.Linear(1, embed_dim)
         
         # === MODALITY TOKENS ===
         self.visual_mod_token = nn.Parameter(
@@ -119,7 +119,7 @@ class AsyncSpaceTimeCrossAttentionResNetYawHist(nn.Module):
             nn.GELU(),
             nn.Linear(embed_dim * 2, embed_dim),
             nn.GELU(),
-            nn.Linear(embed_dim, 2), # sin cos yaw output 
+            nn.Linear(embed_dim, 1), # sin cos yaw output 
         )
         
     def embed_images(self, images):

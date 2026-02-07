@@ -14,30 +14,46 @@ from torchvision.transforms import v2
 from torch.utils.data import DataLoader, random_split
 
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
-from trailer_pose_network.models.spacetime.async_st_ca_rn import AsyncSpaceTimeCrossAttentionResNet
+from trailer_pose_network.models.spacetime.async_st_ca_rn_trailer import AsyncSpaceTimeCrossAttentionResNet
 
-from trailer_pose_network.trainer import Trainer
 
 #%%
 # Set Global variables
 
 # === FILE LOADING ===
-SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2_1\\"
-SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF2_1\\" 
+SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2\\"
+SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF2\\" 
 
 # SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02"
 # SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_st_ca_rn_acc_yaw"
-WEIGHT_FILE = "async_st_ca_rn_acc_yaw_v2.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_st_ca_rn_acc_yaw_trailer\\imu_0"
+WEIGHT_FILE = "async_st_ca_rn_acc_yaw_trailer_imu0_v2.pth"
 WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
-
 # === DATALOADER PARAMETERS ===
-SEQ_LOOKBACK = 2
+SEQ_LOOKBACK = 2 
 IMG_SIZE = (224,224)
-BATCH_SIZE = 1
-VAL_RATIO = 0.2
+BATCH_SIZE = 6
 NUM_WORKERS = 4
+# PREPROCESS_DATA = {
+#     "mean_steer_ang": 0.00010474232904788316, 
+#     # "mean_vx": 18.287964405986905,
+#     "mean_imu_accel_x": -0.08054565556000937, 
+#     "mean_imu_accel_y": 0.059256087349158076, 
+#     "mean_imu_accel_z": -9.820629497778299, 
+#     "mean_imu_gyro_x": -0.0004527679883824836, 
+#     "mean_imu_gyro_y": 1.7486348199251608e-06,
+#     "mean_imu_gyro_z": -0.0007029802208594473,
+#     "std_steer_ang": 0.11945972354652491, 
+#     # "std_vx": 9.763229616274344, 
+#     "std_imu_accel_x": 0.38069991167038575,
+#     "std_imu_accel_y": 2.0534440012091593, 
+#     "std_imu_accel_z": 0.26311322761089984, 
+#     "std_imu_gyro_x": 0.007918682043185972, 
+#     "std_imu_gyro_y": 0.002558814472160346, 
+#     "std_imu_gyro_z": 0.16526482988751023
+# }
+PREPROCESS_DATA = None
 
 # === MODEL PARAMETERS ===
 NUM_DELTAS = 1
@@ -46,12 +62,10 @@ NUM_IMU_SAMPLES = 5
 EMBED_DIM = 384
 NUM_HEADS = 8
 DEPTH = 8
-PATCH_SIZE = 16
-
-IN_CHANNELS = 3
 IMU_CHANNELS = 8
 DROPOUT = 0.
 NUM_OUTPUTS = 3
+MODALITY_DROPOUTS = None
 
 #%%
 # test
@@ -67,21 +81,22 @@ def test():
             v2.Resize(IMG_SIZE),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            ),
+            # v2.Normalize(
+            #     mean=[0.485, 0.456, 0.406],
+            #     std=[0.229, 0.224, 0.225]
+            # ),
         ]),
+        preprocess_data=PREPROCESS_DATA
     )
     # Generate loaders
     test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
     # Load model
     model = AsyncSpaceTimeCrossAttentionResNet(
         resnet_model=torchvision.models.resnet34(weights=None),
+        resnet_model_hitch=torchvision.models.resnet34(weights=None),
         num_deltas=NUM_DELTAS,
         img_size=IMG_SIZE,
         seqential_lookback=SEQ_LOOKBACK,
-        in_channels=IN_CHANNELS,
         embed_dim=EMBED_DIM,
         num_frames=NUM_FRAMES,
         num_imu_samples=NUM_IMU_SAMPLES,
@@ -89,6 +104,7 @@ def test():
         num_heads=NUM_HEADS,
         depth=DEPTH,
         dropout=DROPOUT,
+        modality_dropout=MODALITY_DROPOUTS,
     )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Device is Use: %s' % device)
@@ -117,9 +133,9 @@ def test():
 
             y = y.to(device=device, dtype=torch.float32)
 
-            trans_est, rot_est = model(x)
+            trans_est, rot_est, hitch_est = model(x)
             
-            est = torch.cat((trans_est, rot_est), dim=1)
+            est = torch.cat((trans_est, rot_est, hitch_est), dim=1)
             est_array.append(est)
             truth_array.append(y)
             
@@ -172,10 +188,12 @@ if __name__ == "__main__":
     dx_body = est_array[:,0]
     dy_body = est_array[:,1]
     dyaw = est_array[:,2]
+    hitch = est_array[:,3]
     
     dx_body_truth = truth_array[:,0]
     dy_body_truth = truth_array[:,1]
     dyaw_truth = truth_array[:,2]
+    hitch_truth = truth_array[:,3]
     
     # df = pd.read_csv(TEST_CSV)
     df = test_set.df
@@ -202,11 +220,13 @@ if __name__ == "__main__":
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.legend(["Est", "Truth"])
+    plt.tight_layout()
     plt.show()
     
     error = compute_abs_pos_error((df["X"],df["Y"]), (X_est_array, Y_est_array))
     plt.plot(error)
     plt.ylabel("Position Error")
+    plt.tight_layout()
     plt.show()
     
     plt.subplot(211)
@@ -215,12 +235,29 @@ if __name__ == "__main__":
     plt.subplot(212)
     plt.plot(Y_est_array - df["Y"])
     plt.ylabel("Northing Error")
+    plt.tight_layout()
     plt.show()
-        
+      
+    plt.subplot(211)  
     plt.plot(yaw_est_array)
     plt.plot(df["yaw"], '--')
     plt.ylabel("Yaw prediction")
     plt.legend(["Est", "Truth"])
+    plt.subplot(212)
+    plt.plot(yaw_est_array - df["yaw"])
+    plt.ylabel('Yaw Error')
+    plt.tight_layout()
+    plt.show()
+    
+    plt.subplot(211)  
+    plt.plot(np.rad2deg(hitch))
+    plt.plot(np.rad2deg(hitch_truth), '--')
+    plt.ylabel("Hitch prediction (deg)")
+    plt.legend(["Est", "Truth"])
+    plt.subplot(212)
+    plt.plot(np.rad2deg(hitch - hitch_truth))
+    plt.ylabel('Htich Error (deg)')
+    plt.tight_layout()
     plt.show()
     
     plt.subplot(311)
@@ -254,3 +291,39 @@ if __name__ == "__main__":
     plt.show()
     
 
+# PREPROCESS_DATA = {     # SIM TRAINING DATA STATISTICS
+#     "mean_steer_ang": 0.00010474232904788316, 
+#     "mean_vx": 18.287964405986905, 
+#     "mean_imu_accel_x": -0.03210047741594339, 
+#     "mean_imu_accel_y": 0.02469601869018359, 
+#     "mean_imu_accel_z": -9.815943088412155, 
+#     "mean_imu_gyro_x": -0.001249379855227762, 
+#     "mean_imu_gyro_y": 0.0008506330686480256, 
+#     "mean_imu_gyro_z": -0.00031432984528056176,
+#     "std_steer_ang": 0.11945972354652493, 
+#     "std_vx": 9.763229616274344, 
+#     "std_imu_accel_x": 0.258235143710354, 
+#     "std_imu_accel_y": 2.0279488102074175, 
+#     "std_imu_accel_z": 0.12271902157743174, 
+#     "std_imu_gyro_x": 0.009022401167484217, 
+#     "std_imu_gyro_y": 0.0037328788472177263, 
+#     "std_imu_gyro_z": 0.165953626021579
+# }
+# PREPROCESS_DATA = { # CURRENTLY THE TEST DATA STATISICS (FOR DATA SWAP)
+#     "mean_steer_ang": -0.0018256783213060977,
+#     "mean_vx": 11.617652042642014,
+#     "mean_imu_accel_x": -0.07951864128677506,
+#     "mean_imu_accel_y": -0.08383250730508374,
+#     "mean_imu_accel_z": -9.856500136352544,
+#     "mean_imu_gyro_x": -0.003448715528186841,
+#     "mean_imu_gyro_y": -0.0008867832780533307,
+#     "mean_imu_gyro_z": -0.002825871540460926,
+#     "std_steer_ang": 0.12929468914605133, 
+#     "std_vx": 3.5636214327853173, 
+#     "std_imu_accel_x": 0.2574701751675872, 
+#     "std_imu_accel_y": 2.342593752066911, 
+#     "std_imu_accel_z": 0.13390621690756863, 
+#     "std_imu_gyro_x": 0.01692068461458399, 
+#     "std_imu_gyro_y": 0.006417072237157534, 
+#     "std_imu_gyro_z": 0.20520836409808133
+# }
