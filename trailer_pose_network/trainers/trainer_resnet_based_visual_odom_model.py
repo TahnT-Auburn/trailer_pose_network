@@ -246,13 +246,13 @@ class Trainer():
         
         # package outs dict for returns
         outs = {"lr_history": lr_history,
-                "train_loss_history": train_loss_history,
+                "train_total_loss_history": train_loss_history,
                 "train_epoch_loss_history": train_epoch_loss_history,
             }
         if self.check_accuracy:
             outs["rmse_train_history"] = rmse_train_history
         if self.run_val:
-            outs["val_loss_history"] = val_loss_history
+            outs["val_total_loss_history"] = val_loss_history
             outs["val_epoch_loss_history"] = val_epoch_loss_history
             if self.check_accuracy:
                 outs["rmse_val_history"] = rmse_val_history
@@ -260,7 +260,7 @@ class Trainer():
         if self.save_outs is not None:    
             # df = pd.DataFrame(outs)
             df = pd.DataFrame(dict([(k,pd.Series(v)) for k,v in outs.items()]))
-            df.to_csv(self.save_outs["save_path"])
+            df.to_csv(self.save_outs)
             print("Training outs saved to: %s" % self.save_outs)
 
         return self.model, outs    

@@ -17,7 +17,6 @@ class AsyncSpaceTimeCrossAttention(nn.Module):
         num_heads = 12,
         depth = 12, # TODO: make depth a list which spans all three transformers used
         dropout = 0.,
-        num_outputs = 3,
     ):
         super().__init__()
         assert img_size[0]*img_size[1] % patch_size == 0, \

@@ -16,19 +16,17 @@ import pytorch_warmup as warmup
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
 from trailer_pose_network.models.spacetime.finalized.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
 
-from trailer_pose_network.trainer import Trainer
-
 #%%
 # Set Global variables
 
 # === FILE LOADING ===
-# SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02\\"
-# SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02\\"            
-SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2_1\\"
-SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF2_1\\" 
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\6_19_25\\05\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\6_19_25\\05\\"            
+# SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF1\\"
+# SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF1\\" 
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time_official"
-WEIGHT_FILE = "sim_v2.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_official\\"
+WEIGHT_FILE = "exp_v1.pth"
 WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 # === DATALOADER PARAMETERS ===
@@ -49,7 +47,7 @@ NUM_WORKERS = 4
 #     "std_vx": 9.763229616274344,
 #     "std_imu_accel_x": 0.38069991167038575, 
 #     "std_imu_accel_y": 2.0534440012091593, 
-#     "std_imu_accel_z": 0.26311322761089984, 
+#     "std_imu_accel_z": 0.263113227s61089984, 
 #     "std_imu_gyro_x": 0.007918682043185972, 
 #     "std_imu_gyro_y": 0.002558814472160346, 
 #     "std_imu_gyro_z": 0.16526482988751023
@@ -81,7 +79,8 @@ def test():
                                             v2.Resize(IMG_SIZE),
                                             v2.ToTensor(),
                                         ]),
-                                        preprocess_data=PREPROCESS_DATA
+                                        preprocess_data=PREPROCESS_DATA,
+                                        # augment_imu=True,
                                     )
 
     # Generate loaders
@@ -98,7 +97,7 @@ def test():
                                          NUM_HEADS,
                                          DEPTH,
                                          DROPOUT,
-                                         NUM_OUTPUTS)
+                                         )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Device is Use: %s' % device)
     model = model.to(device)
@@ -115,8 +114,9 @@ def test():
         for t, (x,y) in enumerate(tqdm(test_loader)):
             
             x[0] = x[0].to(device=device, dtype=torch.float32)
+            # x[.il1][:,:,-1] = x[1][:,:,-1] + 0.001*torch.randn_like(x[1][:,:,-1]) + 5e-3
             x[1] = x[1].to(device=device, dtype=torch.float32)
-
+            # 
             y = y.to(device=device, dtype=torch.float32)
 
             trans_est, rot_est = model(x)
@@ -189,6 +189,11 @@ if __name__ == "__main__":
     yaw_est_array.insert(0,df.iloc[0]["yaw"])
     
     for i in range(1,len(df)):
+        if i == len(df) // 2: # Apply psudeo GPS correction at halfway mark
+            X_est_array[i-1] = df['X'].iloc[i-1]
+            Y_est_array[i-1] = df['Y'].iloc[i-1]
+            yaw_est_array[i-1] = df['yaw'].iloc[i-1]
+            
         pose_prev = (X_est_array[i-1], Y_est_array[i-1], yaw_est_array[i-1])
         X_est, Y_est =  body_to_tangent_frame_translation(pose_prev, dx_body=dx_body[i-1], dy_body=dy_body[i-1])
         yaw_est = yaw_est_array[i-1] + dyaw[i-1]
@@ -217,11 +222,14 @@ if __name__ == "__main__":
     plt.plot(Y_est_array - df["Y"])
     plt.ylabel("Northing Error")
     plt.show()
-        
+    
+    plt.subplot(211)
     plt.plot(yaw_est_array)
     plt.plot(df["yaw"], '--')
     plt.ylabel("Yaw prediction")
     plt.legend(["Est", "Truth"])
+    plt.subplot(212)
+    plt.plot(yaw_est_array - df["yaw"])
     plt.show()
     
     plt.subplot(311)
@@ -264,3 +272,5 @@ if __name__ == "__main__":
     # }
     # df = pd.DataFrame(data)
     # df.to_csv(output_file, index=False)
+
+# %%

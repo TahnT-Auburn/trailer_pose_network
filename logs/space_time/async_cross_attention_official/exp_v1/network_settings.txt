@@ -1,0 +1,65 @@
+Weights saved to: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\experimental\async_space_time_official\exp_v1.pth
+Outputs = [dx, dy, dyaw]
+Checkpoint (30 of 30)
+Training RMSE: [0.00153778 0.00302987 0.01030253 0.0363619 ]
+Validation RMSE: [0.00269081 0.00324814 0.0115258  0.04079832]
+
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
+
+SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW_VAL = "D:\\TestingData\\experimental\\40Hz\\original\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_official"
+WEIGHT_FILE = "exp_v1.pth"
+WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+
+SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_cross_attention_official\\exp_v1\\training_log.csv"
+
+PRETRAINED_WEIGHTS = None
+PRETRAINED = False
+
+# === DATALOADER PARAMETERS ===
+SEQ_LOOKBACK = 8
+IMG_SIZE = (224,224)
+BATCH_SIZE = 4
+VAL_RATIO = 0.2
+NUM_WORKERS = 0
+
+PREPROCESS_DATA = None
+# === MODEL PARAMETERS ===
+NUM_FRAMES = 2
+NUM_IMU_SAMPLES = 5
+EMBED_DIM = 384
+NUM_HEADS = 8
+DEPTH = 8
+PATCH_SIZE = 16
+IN_CHANNELS = 3
+IMU_CHANNELS = 8
+DROPOUT = 0.
+NUM_OUTPUTS = 4
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 30
+LR = 1e-4
+LOSS_SCALE = [1e0, 1e0, 5]
+LOSS_FUNC = [nn.MSELoss(), nn.MSELoss(), nn.MSELoss()]
+# LOSS_SCALE = 1e1
+# LOSS_FUNC = nn.L1Loss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+RUN_VAL = True
+OVERFIT_DETECTOR = False
+CHECK_ACCURACY = True
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+warmup_period = len(loader_train) * WARMUP_PERIOD
+warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Works but is severly dependent on the IMU. 
+- Works worst than model based solution so far. ACTUALLY not worst for ALL trajectories!
+- Only way to use this is to see if network can withstand randomized biases and noise added to IMU during training.

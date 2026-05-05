@@ -302,7 +302,7 @@ if __name__ == "__main__":
             plt.xlabel('Epochs')
             
 
-    
+    # 
         # hitch_rmse_train = train_rmse[:,0]
         # hr_rmse_train = train_rmse[:,1]
         # hitch_rmse_val = val_rmse[:,0]

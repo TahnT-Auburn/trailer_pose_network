@@ -20,6 +20,8 @@ class AsyncTemporalDataLoader(Dataset):
                  transform_img = None,
                  get_data_stats:bool = False,
                  preprocess_data:dict | None = None,
+                 domain_rand_imu:bool = False,
+                 domain_rand_img:bool = False,
                 ):
         self.sequence_root_processed = sequence_root_processed
         self.sequence_root_raw = sequence_root_raw
@@ -30,7 +32,9 @@ class AsyncTemporalDataLoader(Dataset):
         self.transform_img = transform_img
         self.get_data_stats = get_data_stats
         self.preprocess_data = preprocess_data
-
+        self.domain_rand_imu = domain_rand_imu
+        self.domain_rand_img = domain_rand_img
+        
         # assert valid input keys
         for input in inputs.keys():
                 if input == "cam" or input == "can" or input == "imu" or input == "yaw_hist":
@@ -88,7 +92,6 @@ class AsyncTemporalDataLoader(Dataset):
             self.sequence_list_raw = [group.reset_index(drop=True) 
                      for _, group in df_raw_unified.groupby('SUBSET', sort=True)]
             
-                
     def __len__(self):
         return len(self.df)
     
@@ -146,8 +149,13 @@ class AsyncTemporalDataLoader(Dataset):
                     concat_images = list(executor.map(cv2.hconcat,image_pairs))
                     # concat_images = list(executor.map(self.change_img_color,concat_images))
                     if self.transform_img is not None:
-                            concat_images = list(executor.map(self.transform_img,concat_images))
+                        concat_images = list(executor.map(self.transform_img,concat_images))
 
+                    # apply domain randomization to images
+                    if self.domain_rand_img:
+                        if np.random.rand() < 0.25: # proc only 25% of the time
+                            concat_images = list(executor.map(self._augment_img, concat_images))
+                        
             input_cam = torch.stack(concat_images)
             # input_cam = torch.randn_like(input_cam)
 
@@ -163,9 +171,15 @@ class AsyncTemporalDataLoader(Dataset):
         if self.inputs["can"]:
             input_can = torch.stack([torch.tensor(seq_block_raw["steer_ang"].to_list()),torch.tensor(seq_block_raw["vx"].to_list())]).permute(1,0)
             # input_can = torch.randn(5,2)
+            
         if self.inputs["imu"]:
             input_imu = torch.stack([torch.tensor(seq_block_raw["imu_accel_x"].to_list()),torch.tensor(seq_block_raw["imu_accel_y"].to_list()),torch.tensor(seq_block_raw["imu_accel_z"].to_list()),
             torch.tensor(seq_block_raw["imu_gyro_x"].to_list()),torch.tensor(seq_block_raw["imu_gyro_y"].to_list()),torch.tensor(seq_block_raw["imu_gyro_z"].to_list())]).permute(1,0)
+            # augment IMU if prompted
+            if self.domain_rand_imu:
+                if np.random.rand() < 0.8:
+                    input_imu = self._augment_imu(input_imu)
+                    
         # input_imu = torch.randn(5,6)
         if self.inputs["yaw_hist"]:
             seq_block_10hz = seq_block_raw.iloc[::4].reset_index(drop=True) # get 10Hz sequence block
@@ -202,6 +216,7 @@ class AsyncTemporalDataLoader(Dataset):
         return inputs, targets
     
     ############# Utility Methods #############
+    
     def getSequences(self, sequence_root, single:bool=False, seq_id:tuple=None):
         """
         Gets all sequences or a single sequence from the sequnce root directory.
@@ -234,7 +249,45 @@ class AsyncTemporalDataLoader(Dataset):
                                         seq_df = pd.read_csv(seq_path, dtype={"SUBSET": str}, header='infer')
                                         sequences.append(seq_df)
                 return sequences
-
+            
+    def _augment_imu(
+        self,
+        imu_sequence,
+        gyro_bias_range=(1e-7, 5e-3),      # rad/s
+        accel_bias_range=(0.025, 0.1),      # m/s^2
+        gyro_noise_scale=1.0,             # multiply base noise
+        accel_noise_scale=1.0,
+        ):
+        # isolate only the IMU porition of the inertial sequence
+        # NOTE: This assumes that CAN measuremetns are part of inertial_sequence
+        T = imu_sequence.shape[0]
+        imu_aug = imu_sequence.clone()
+        
+        # Random biases for this sequence
+        gyro_bias = torch.randn(3) * np.random.uniform(*gyro_bias_range)
+        accel_bias = torch.randn(3) * np.random.uniform(*accel_bias_range)
+        
+        for t in range(T):
+            # Add bias
+            imu_aug[t, 0:3] += accel_bias  # ax, ay, az
+            imu_aug[t, 3:6] += gyro_bias   # gx, gy, gz
+            
+            # Add scaled noise
+            imu_aug[t, 0:3] += torch.randn(3) * 0.01 * accel_noise_scale
+            imu_aug[t, 3:6] += torch.randn(3) * 0.001 * gyro_noise_scale
+            
+        return imu_aug
+    
+    def _augment_img(
+        self,
+        image:torch.Tensor, # [C, W, H]
+        noise_std_range = (0.01, 0.1),
+    ):
+        std = np.random.uniform(*noise_std_range)
+        noise = torch.normal(0, std, size=(image.shape[1], image.shape[2]))
+        noisy_image = image + noise.unsqueeze(0)
+        return noisy_image
+        
     def load_image(self, image_path):
         """Loads an image using OpenCV."""
         try:
@@ -293,10 +346,11 @@ class AsyncTemporalDataLoader(Dataset):
             # outputs = [dx_body_, dy_body_, dyaw_, yaw.to_list()]
             # outputs = [dx_body_, dy_body_, dyaw_, sin_yaw, cos_yaw]
             # outputs = [dx_body_, dy_body_, dyaw_, hitch] # TODO: Must update trainer to incorporate trailer states
+            # outputs = [dx_body_[-1], dy_body_[-1], dyaw_[-1]]
             outputs = [dx_body_, dy_body_, dyaw_]
             # outputs = [dx_body, dy_body, dyaw]
+            # outputs = [dyaw]
             outputs = torch.as_tensor(outputs).squeeze()
-            # outputs = outputs.unsqueeze(dim=1)
             return outputs
         
     def tangent_to_body_frame_translation(self, pose1, pose2):

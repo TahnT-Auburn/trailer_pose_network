@@ -244,8 +244,8 @@ class Trainer():
                     est = self.model(inputs)
                     # print(f'Model time: {time.time() - model_start_time}')
                     # parse estimates
-                    trans_est = est[0].squeeze(dim=2) # [B,2]
-                    rot_est = est[1].squeeze(dim=2) # [B,1]
+                    trans_est = est[0] # [B,2]
+                    rot_est = est[1] # [B,1]
                     # accumulate the yaw prediction over sequence length
                     acc_yaw_pred += rot_est
                     acc_yaw_truth += rot_target
@@ -362,8 +362,8 @@ class Trainer():
                             # call model
                             est = self.model(inputs)
                             # parse estimates
-                            trans_est = est[0].squeeze(dim=2)
-                            rot_est = est[1].squeeze(dim=2)
+                            trans_est = est[0]
+                            rot_est = est[1]
                             # accumulate the yaw prediction over sequence length
                             acc_yaw_pred += rot_est
                             acc_yaw_truth += rot_target
@@ -507,7 +507,7 @@ class Trainer():
         if self.save_outs is not None:    
             # df = pd.DataFrame(outs)
             df = pd.DataFrame(dict([(k,pd.Series(v)) for k,v in outs.items()]))
-            df.to_csv(self.save_outs["save_path"])
+            df.to_csv(self.save_outs)
             print("Training outs saved to: %s" % self.save_outs)
 
         return self.model, outs

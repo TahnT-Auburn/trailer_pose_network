@@ -27,10 +27,11 @@ class HitchDataloader(Dataset):
         
         # Reduce dataframe by stratification if prompted
         if self.reduce["target_column"] is not None and self.reduce["target_size"] is not None:
-                self.df = self.stratified_sampling_dataframe(df=self.df,
-                                                                target_column=self.reduce["target_column"],
-                                                                target_size=self.reduce["target_size"])
-    
+                self.df = self.stratified_sampling_dataframe(
+                    df=self.df,
+                    target_column=self.reduce["target_column"],
+                    target_size=self.reduce["target_size"])
+        stop=1
     def __len__(self):
         return len(self.df)
     

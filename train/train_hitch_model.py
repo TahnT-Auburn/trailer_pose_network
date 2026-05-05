@@ -22,16 +22,20 @@ from trailer_pose_network.trainers.trainer_hitch_model import Trainer
 # Set Global variables
 
 # === FILE LOADING ===
-TRAIN_CSV_ROOT = "D:\\TrainingData\\simulation\\processed\\"
+# TRAIN_CSV_ROOT = "D:\\TrainingData\\simulation\\processed\\"
 
-VAL_CSV_ROOT = "D:\\TestingData\\simulation\\processed\\"
+# VAL_CSV_ROOT = "D:\\TestingData\\simulation\\processed\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\trailer_hitch"
-WEIGHT_FILE = "sim_v1.pth"
+TRAIN_CSV_ROOT = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+
+VAL_CSV_ROOT = "D:\\TestingData\\experimental\\10Hz\\original\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\trailer_hitch"
+WEIGHT_FILE = "exp_v1.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
 
-SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\trailer_hitch\\sim_v1\\training_log.csv"
+SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\trailer_hitch\\exp_v1\\training_log.csv"
 
 PRETRAINED_WEIGHTS = None
 PRETRAINED = False
@@ -48,7 +52,7 @@ DROPOUT = 0.
 
 # === TRAINING PARAMETERS ===
 NUM_EPOCHS = 30
-LR = 1e-4
+LR = 3e-5
 LOSS_SCALE = 1e3
 LOSS_FUNC = nn.MSELoss()
 BETAS = (0.9, 0.999)
@@ -61,7 +65,7 @@ def train():
     # Load dataset
     train_set = HitchDataloader(
         csv_root=TRAIN_CSV_ROOT,
-        # reduce={'target_column':'steer_ang', 'target_size':10},
+        reduce={'target_column':'hitch', 'target_size':10000},
         transforms=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
@@ -70,7 +74,7 @@ def train():
     )
     val_set = HitchDataloader(
         csv_root=VAL_CSV_ROOT,
-        reduce={'target_column':'hitch', 'target_size':1500},
+        reduce={'target_column':'hitch', 'target_size':10000},
         transforms=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),

@@ -25,8 +25,8 @@ from trailer_pose_network.trainer import Trainer
 # === FILE LOADING ===
 # SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02\\"
 # SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02\\"            
-SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2\\"
-SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF2\\" 
+SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2_1\\"
+SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF2_1\\" 
 
 WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time"
 WEIGHT_FILE = "TEMPTEST_RESNET_async_space_time_cross_attn_v1.pth"

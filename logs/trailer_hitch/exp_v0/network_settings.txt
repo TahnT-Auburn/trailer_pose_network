@@ -1,0 +1,49 @@
+Weights saved to: C:\Users\Tahn\SoftDevel\trailer_pose_network\weights\experimental\trailer_hitch\exp_v0.pth
+Output = hitch angle
+RMSE at final checkpoint (16 of 30):
+Training RMSE: 0.30610382556915283
+Validation RMSE: 0.7830643057823181
+
+TRAIN_CSV_ROOT = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+
+VAL_CSV_ROOT = "D:\\TestingData\\experimental\\10Hz\\original\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\trailer_hitch"
+WEIGHT_FILE = "exp_v0.pth"
+WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
+SAVE_WEIGHTS = WEIGHT_SAVE_PATH
+
+SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\trailer_hitch\\exp_v0\\training_log.csv"
+
+PRETRAINED_WEIGHTS = None
+PRETRAINED = False
+
+# === DATALOADER PARAMETERS ===
+IMG_SIZE = (224,224)
+BATCH_SIZE = 6
+NUM_WORKERS = 4
+reduce={'target_column':'hitch', 'target_size':15000},
+
+# === MODEL PARAMETERS ===
+ENCODER = torchvision.models.mobilenet_v2(weights='IMAGENET1K_V1')
+EMBED_DIM = 784
+DROPOUT = 0.
+
+# === TRAINING PARAMETERS ===
+NUM_EPOCHS = 30
+LR = 1e-4
+LOSS_SCALE = 1e3
+LOSS_FUNC = nn.MSELoss()
+BETAS = (0.9, 0.999)
+WEIGHT_DECAY = 0.05
+WARMUP_PERIOD = 2 # The number of epochs to warmup
+OVERFIT_DETECTOR = False
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
+warmup_period = len(loader_train) * WARMUP_PERIOD
+warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
+
+Comments:
+- Uses mobilenet_v2 encoder like sim.
+- Training shows some overfitting but inference looks great! Can definitely use. Can retrain to get better training results if have time.

@@ -169,15 +169,8 @@ class Trainer():
                 self.model.train()
                 # NOTE: x are the images
                 #       y are the estimates
-                if isinstance(x,list):
-                    if len(x) == 2:
-                        x[0] = x[0].to(device=self.device, dtype=torch.float32)
-                        x[1] = x[1].to(device=self.device, dtype=torch.float32)
-                    else:
-                        x = x[0] # grab first TODO: Modify this to be more interactive. Make num_inputs a parameter
-                        x = x.to(device=self.device, dtype=torch.float32)
-                else:
-                    x = x.to(device=self.device, dtype=torch.float32)
+                x[0] = x[0].to(device=self.device, dtype=torch.float32)
+                x[1] = x[1].to(device=self.device, dtype=torch.float32)
 
                 y = y.to(device=self.device, dtype=torch.float32)
 
@@ -275,15 +268,9 @@ class Trainer():
                             break
                         # NOTE: x are the images
                         #       y are the estimates
-                        if isinstance(x,list):
-                            if len(x) == 2:
-                                x[0] = x[0].to(device=self.device, dtype=torch.float32)
-                                x[1] = x[1].to(device=self.device, dtype=torch.float32)
-                            else:
-                                x = x[0] # grab first TODO: Modify this to be more interactive. Make num_inputs a parameter
-                                x = x.to(device=self.device, dtype=torch.float32)
-                        else:
-                            x = x.to(device=self.device, dtype=torch.float32)
+
+                        x[0] = x[0].to(device=self.device, dtype=torch.float32)
+                        x[1] = x[1].to(device=self.device, dtype=torch.float32)
 
                         y = y.to(device=self.device, dtype=torch.float32)
 
@@ -392,17 +379,17 @@ class Trainer():
             
         # package outs dict for returns
         outs = {"lr_history": lr_history,
-                "train_loss_history": train_loss_history,
-                "train_loss1_history": train_loss1_history,
-                "train_loss2_history": train_loss2_history,
+                "train_total_loss_hist": train_loss_history,
+                "train_trans_loss_hist": train_loss1_history,
+                "train_rot_loss_hist": train_loss2_history,
                 "train_epoch_loss_history": train_epoch_loss_history,
             }
         if self.check_accuracy:
             outs["rmse_train_history"] = rmse_train_history
         if self.run_val:
-            outs["val_loss_history"] = val_loss_history
-            outs["val_loss1_history"] = val_loss1_history
-            outs["val_loss2_history"] = val_loss2_history
+            outs["val_total_loss_hist"] = val_loss_history
+            outs["val_trans_loss_hist"] = val_loss1_history
+            outs["val_rot_loss_hist"] = val_loss2_history
             outs["val_epoch_loss_history"] = val_epoch_loss_history
             if self.check_accuracy:
                 outs["rmse_val_history"] = rmse_val_history

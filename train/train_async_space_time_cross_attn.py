@@ -15,35 +15,40 @@ import pytorch_warmup as warmup
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
 from trailer_pose_network.models.spacetime.finalized.async_space_time_cross_attention import AsyncSpaceTimeCrossAttention
 
+# from trailer_pose_network.trainers.trainer_acc_yaw_deltas import Trainer
 from trailer_pose_network.trainer import Trainer
-
 #%%
 # Set Global variables
 
 # === FILE LOADING ===
-SEQ_ROOT_PROCESSED = "D:\\TrainingData\\simulation\\10Hz\\"
-SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
+SEQ_ROOT_PROCESSED = "D:\\TrainingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW = "D:\\TrainingData\\experimental\\40Hz\\original\\"
 
-SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
-SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed\\"
+SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\experimental\\10Hz\\original\\"
+SEQ_ROOT_RAW_VAL = "D:\\TestingData\\experimental\\40Hz\\original\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time_official"
-WEIGHT_FILE = "sim_v2.pth"
+# SEQ_ROOT_PROCESSED = "D:\\TrainingData\\simulation\\10Hz\\"
+# SEQ_ROOT_RAW = "D:\\TrainingData\\simulation\\processed\\"
+
+# SEQ_ROOT_PROCESSED_VAL = "D:\\TestingData\\simulation\\10Hz\\"
+# SEQ_ROOT_RAW_VAL = "D:\\TestingData\\simulation\\processed\\"
+
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_space_time_official"
+WEIGHT_FILE = "exp_v3.pth"
 WEIGHT_SAVE_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 SAVE_WEIGHTS = WEIGHT_SAVE_PATH
 
-SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_cross_attention_official\\sim_v2\\training_log.csv"
+SAVE_LOG = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\logs\\space_time\\async_cross_attention_official\\exp_v3\\training_log.csv"
 
-PRETRAINED_WEIGHTS = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_space_time\\async_space_time_cross_attn_v1.pth"
+PRETRAINED_WEIGHTS = None
 PRETRAINED = False
 
 # === DATALOADER PARAMETERS ===
 SEQ_LOOKBACK = 2
 IMG_SIZE = (224,224)
-BATCH_SIZE = 6
+BATCH_SIZE = 4
 VAL_RATIO = 0.2
 NUM_WORKERS = 4
-# NUM_WORKERS = 0
 # PREPROCESS_DATA = { # SIM TRAINING DATA STATISTICS (IMU0)
 #     "mean_steer_ang": 0.00010474232904788316, 
 #     "mean_vx": 18.287964405986905,
@@ -76,8 +81,8 @@ DROPOUT = 0.
 NUM_OUTPUTS = 3
 
 # === TRAINING PARAMETERS ===
-NUM_EPOCHS = 30
-LR = 3e-5
+NUM_EPOCHS = 60
+LR = 1e-4
 LOSS_SCALE = [1e0, 3e2]
 LOSS_FUNC = [nn.MSELoss(), nn.MSELoss()]
 # LOSS_SCALE = 1e1
@@ -98,26 +103,30 @@ def train():
         sequence_root_raw=SEQ_ROOT_RAW,
         sequential_lookback=SEQ_LOOKBACK,
         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-        # reduce={'target_column':'steer_ang', 'target_size':10},
+        # reduce={'target_column':'yaw', 'target_size':15000},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToTensor(),
         ]),
         preprocess_data=PREPROCESS_DATA,
+        # domain_rand_imu=True,
+        # domain_rand_img=True,
     )
     val_set = AsyncTemporalDataLoader(
         sequence_root_processed=SEQ_ROOT_PROCESSED_VAL,
         sequence_root_raw=SEQ_ROOT_RAW_VAL,
         sequential_lookback=SEQ_LOOKBACK,
         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-        reduce={'target_column':'steer_ang', 'target_size':1500},
+        reduce={'target_column':'yaw', 'target_size':1500},
         transform_img=v2.Compose([
             v2.ToPILImage(),
             v2.Resize(IMG_SIZE),
             v2.ToTensor(),
         ]),
         preprocess_data=PREPROCESS_DATA,
+        # domain_rand_imu=True,
+        # domain_rand_img=True,
     )
     # num_val = int(np.round(VAL_RATIO * len(full_set)))
     # num_train = len(full_set) - num_val
@@ -138,7 +147,7 @@ def train():
                                          NUM_HEADS,
                                          DEPTH,
                                          DROPOUT,
-                                         NUM_OUTPUTS)
+            )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Device is Use: %s' % device)
     model = model.to(device)
@@ -150,8 +159,8 @@ def train():
         
     # Set up training
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, betas=BETAS, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max=(NUM_EPOCHS)*len(loader_train), eta_min=0.0)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=len(loader_train)*2, T_mult=2)
     warmup_period = len(loader_train) * WARMUP_PERIOD
     warmup_scheduler = warmup.LinearWarmup(optimizer=optimizer, warmup_period=warmup_period)
     
@@ -198,11 +207,11 @@ if __name__ == "__main__":
         plt.xlabel('Iterations')
         plt.ylabel('Learning Rate')
         plt.subplot(4,1,2)
-        plt.plot(outs["train_loss_history"])
+        plt.plot(outs["train_total_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Training Loss')
         plt.subplot(4,1,3)
-        plt.plot(outs["val_loss_history"])
+        plt.plot(outs["val_total_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Validation Loss')
         plt.subplot(4,1,4)
@@ -217,7 +226,7 @@ if __name__ == "__main__":
         plt.xlabel('Iterations')
         plt.ylabel('Learning Rate')
         plt.subplot(3,1,2)
-        plt.plot(outs["train_loss_history"])
+        plt.plot(outs["train_total_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Training Loss')
         plt.subplot(3,1,3)
@@ -229,28 +238,28 @@ if __name__ == "__main__":
 
     if RUN_VAL:
         plt.subplot(411)
-        plt.plot(outs["train_loss1_history"])
+        plt.plot(outs["train_trans_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss1 (Trans)')
         plt.subplot(412)
-        plt.plot(outs["train_loss2_history"])
+        plt.plot(outs["train_rot_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss2 (Rot)')
         plt.subplot(413)
-        plt.plot(outs["val_loss1_history"])
+        plt.plot(outs["val_trans_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss1 (Trans)')
         plt.subplot(414)
-        plt.plot(outs["val_loss2_history"])
+        plt.plot(outs["val_rot_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Val Loss2 (Rot)')
     else:
         plt.subplot(211)
-        plt.plot(outs["train_loss1_history"])
+        plt.plot(outs["train_trans_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss1 (Trans)')
         plt.subplot(212)
-        plt.plot(outs["train_loss2_history"])
+        plt.plot(outs["train_rot_loss_hist"])
         plt.xlabel('Iterations')
         plt.ylabel('Train Loss2 (Rot)')
     plt.tight_layout()

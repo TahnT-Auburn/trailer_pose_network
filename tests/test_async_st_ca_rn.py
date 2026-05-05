@@ -16,25 +16,23 @@ from torch.utils.data import DataLoader, random_split
 from trailer_pose_network.dataloaders.asynchronous_temporal_dataloader import AsyncTemporalDataLoader
 from trailer_pose_network.models.spacetime.async_st_ca_rn import AsyncSpaceTimeCrossAttentionResNet
 
-from trailer_pose_network.trainer import Trainer
-
 #%%
 # Set Global variables
 
 # === FILE LOADING ===
-SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2_1\\"
-SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF2_1\\" 
+SEQ_ROOT_PROCESSED = "D:\\TestingData\\simulation\\10Hz\\FF\\FF1\\"
+SEQ_ROOT_RAW = "D:\\TestingData\\simulation\\processed\\FF\\FF1\\" 
 
-# SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02"
-# SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\02"
+SEQ_ROOT_PROCESSED = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\04\\"
+SEQ_ROOT_RAW = "D:\\TestingData\\experimental\\40Hz\\original\\6_19_25\\04\\"
 
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\async_st_ca_rn_acc_yaw"
-WEIGHT_FILE = "async_st_ca_rn_acc_yaw_v2.pth"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\async_st_ca_rn_acc_yaw\\"
+WEIGHT_FILE = "async_st_ca_rn_acc_yaw_v4.pth"
 WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 # === DATALOADER PARAMETERS ===
 SEQ_LOOKBACK = 2
-IMG_SIZE = (224,224)
+IMG_SIZE = (224,448)
 BATCH_SIZE = 1
 VAL_RATIO = 0.2
 NUM_WORKERS = 4
@@ -62,16 +60,16 @@ def test():
         sequence_root_raw=SEQ_ROOT_RAW,
         sequential_lookback=SEQ_LOOKBACK,
         inputs={'cam':True, 'can':True, 'imu':True, 'yaw_hist':False},
-        transform_img=v2.Compose([
-            v2.ToPILImage(),
-            v2.Resize(IMG_SIZE),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            ),
-        ]),
+        # transform_img=v2.Compose([
+        #     v2.ToPILImage(),
+        #     v2.Resize(IMG_SIZE),
+        #     v2.ToImage(),
+        #     v2.ToDtype(torch.float32, scale=True),
+        #     v2.Normalize(
+        #         mean=[0.485, 0.456, 0.406],
+        #         std=[0.229, 0.224, 0.225]
+        #     ),
+        # ]),
     )
     # Generate loaders
     test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
@@ -113,6 +111,7 @@ def test():
         for t, (x,y) in enumerate(tqdm(test_loader)):
 
             x[0] = x[0].to(device=device, dtype=torch.float32)
+            # x[1][:,:,-1] = x[1][:,:,-1] + 0.001*torch.randn_like(x[1][:,:,-1]) + 5e-4
             x[1] = x[1].to(device=device, dtype=torch.float32)
 
             y = y.to(device=device, dtype=torch.float32)
@@ -188,6 +187,10 @@ if __name__ == "__main__":
     
     reset_interval = 50
     for i in range(1,len(df)):
+        if i == len(df) // 2: # Apply psudeo GPS correction at halfway mark
+            X_est_array[i-1] = df['X'].iloc[i-1]
+            Y_est_array[i-1] = df['Y'].iloc[i-1]
+            yaw_est_array[i-1] = df['yaw'].iloc[i-1]
         pose_prev = (X_est_array[i-1], Y_est_array[i-1], yaw_est_array[i-1])
         X_est, Y_est =  body_to_tangent_frame_translation(pose_prev, dx_body=dx_body[i-1], dy_body=dy_body[i-1])
         yaw_est = yaw_est_array[i-1] + dyaw[i-1]
@@ -217,10 +220,13 @@ if __name__ == "__main__":
     plt.ylabel("Northing Error")
     plt.show()
         
+    plt.subplot(211)
     plt.plot(yaw_est_array)
     plt.plot(df["yaw"], '--')
     plt.ylabel("Yaw prediction")
     plt.legend(["Est", "Truth"])
+    plt.subplot(212)
+    plt.plot(yaw_est_array - df["yaw"])
     plt.show()
     
     plt.subplot(311)

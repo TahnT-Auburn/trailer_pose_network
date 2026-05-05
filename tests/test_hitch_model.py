@@ -21,10 +21,10 @@ from trailer_pose_network.models.spacetime.finalized.trailer_hitch_model import 
 # Set Global variables
 
 # === FILE LOADING ===
-TEST_CSV_ROOT = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2_1\\"
-
-WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\simulation\\trailer_hitch"
-WEIGHT_FILE = "sim_v1.pth"
+# TEST_CSV_ROOT = "D:\\TestingData\\simulation\\10Hz\\FF\\FF2_1\\"
+TEST_CSV_ROOT = "D:\\TestingData\\experimental\\10Hz\\original\\6_19_25\\02\\"
+WEIGHT_PARENT = "C:\\Users\\Tahn\\SoftDevel\\trailer_pose_network\\weights\\experimental\\trailer_hitch"
+WEIGHT_FILE = "exp_v0.pth"
 WEIGHT_PATH = os.path.join(WEIGHT_PARENT, WEIGHT_FILE)
 
 # === DATALOADER PARAMETERS ===
